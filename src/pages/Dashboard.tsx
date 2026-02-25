@@ -48,10 +48,10 @@ export default function Dashboard() {
             <Users size={18} />
             <span>Shared with me</span>
           </button>
-          <a href="#" className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-surface-dark transition-colors">
+          <Link to="/explore" className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-surface-dark transition-colors">
             <Compass size={18} />
             <span>Explore</span>
-          </a>
+          </Link>
           <a href="#" className="flex items-center gap-3 px-3 py-2 rounded-lg text-slate-400 hover:bg-surface-dark transition-colors">
             <Settings size={18} />
             <span>Settings</span>

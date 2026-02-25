@@ -37,16 +37,17 @@ const storySchema = new mongoose.Schema({
   wordCount: Number,
   isShared: { type: Boolean, default: false },
   authorName: String,
+  versions: [{ content: String, timestamp: { type: Date, default: Date.now } }],
   updatedAt: { type: Date, default: Date.now }
 });
 const Story = mongoose.model('Story', storySchema);
 
 let fallbackStories = [
-  { _id: '1', title: 'The Last Nebula', content: 'The stars over Neo-Veridia were never meant to fade. Kaelen watched as the last shimmer of the indigo nebula dissolved into the void. "It\'s happening," he whispered into the comms, his voice steady despite the trembling of his hands.\n\nBehind him, the rhythmic hum of the atmospheric stabilizers was the only sound in the observation deck. For centuries, the nebula had provided the energy that fueled the world below. Now, as the color drained from the sky, a heavy, silent darkness began to settle over the city\'s spires.', genre: 'Sci-Fi', progress: 45, wordCount: 1248, isShared: false, authorName: 'Julian Barnes', updatedAt: new Date() },
-  { _id: '2', title: 'The Whispering Woods', content: 'Chapter 12: The Lost Clearing...', genre: 'Fantasy', progress: 65, wordCount: 14200, isShared: false, authorName: 'Julian Barnes', updatedAt: new Date() },
-  { _id: '3', title: 'Neon Shadows', content: 'Prologue: Zero Hour...', genre: 'Cyberpunk', progress: 15, wordCount: 2100, isShared: false, authorName: 'Julian Barnes', updatedAt: new Date() },
-  { _id: '4', title: 'Echoes of Eternity', content: 'The ancient clock ticked backwards...', genre: 'Mystery', progress: 80, wordCount: 34000, isShared: true, authorName: 'Sarah Chen', updatedAt: new Date() },
-  { _id: '5', title: 'Crimson Tides', content: 'The sea was red that morning...', genre: 'Thriller', progress: 30, wordCount: 8500, isShared: true, authorName: 'Marcus Vance', updatedAt: new Date() }
+  { _id: '1', title: 'The Last Nebula', content: 'The stars over Neo-Veridia were never meant to fade. Kaelen watched as the last shimmer of the indigo nebula dissolved into the void. "It\'s happening," he whispered into the comms, his voice steady despite the trembling of his hands.\n\nBehind him, the rhythmic hum of the atmospheric stabilizers was the only sound in the observation deck. For centuries, the nebula had provided the energy that fueled the world below. Now, as the color drained from the sky, a heavy, silent darkness began to settle over the city\'s spires.', genre: 'Sci-Fi', progress: 45, wordCount: 1248, isShared: false, authorName: 'Julian Barnes', versions: [], updatedAt: new Date() },
+  { _id: '2', title: 'The Whispering Woods', content: 'Chapter 12: The Lost Clearing...', genre: 'Fantasy', progress: 65, wordCount: 14200, isShared: false, authorName: 'Julian Barnes', versions: [], updatedAt: new Date() },
+  { _id: '3', title: 'Neon Shadows', content: 'Prologue: Zero Hour...', genre: 'Cyberpunk', progress: 15, wordCount: 2100, isShared: false, authorName: 'Julian Barnes', versions: [], updatedAt: new Date() },
+  { _id: '4', title: 'Echoes of Eternity', content: 'The ancient clock ticked backwards...', genre: 'Mystery', progress: 80, wordCount: 34000, isShared: true, authorName: 'Sarah Chen', versions: [], updatedAt: new Date() },
+  { _id: '5', title: 'Crimson Tides', content: 'The sea was red that morning...', genre: 'Thriller', progress: 30, wordCount: 8500, isShared: true, authorName: 'Marcus Vance', versions: [], updatedAt: new Date() }
 ];
 
 app.get('/api/stories', async (req, res) => {
@@ -110,6 +111,27 @@ app.put('/api/stories/:id', async (req, res) => {
     } else {
       res.status(404).json({ error: 'Not found' });
     }
+  }
+});
+
+app.post('/api/stories/:id/versions', async (req, res) => {
+  const { content } = req.body;
+  if (isMongoConnected) {
+    try {
+      const story = await Story.findById(req.params.id);
+      if (!story) return res.status(404).json({ error: 'Not found' });
+      story.versions.push({ content, timestamp: new Date() });
+      await story.save();
+      res.json(story);
+    } catch (e) {
+      res.status(500).json({ error: 'DB Error' });
+    }
+  } else {
+    const story = fallbackStories.find(s => s._id === req.params.id);
+    if (!story) return res.status(404).json({ error: 'Not found' });
+    if (!story.versions) story.versions = [];
+    story.versions.push({ content, timestamp: new Date() });
+    res.json(story);
   }
 });
 
