@@ -150,48 +150,48 @@ service cloud.firestore {
       match /nodes/{nodeId} {
         allow read: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators) ||
-          get(/databases/$(database)/documents/stories/$(storyId)).data.isShared == true
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators) ||
+          ('isShared' in get(/databases/$(database)/documents/stories/$(storyId)).data && get(/databases/$(database)/documents/stories/$(storyId)).data.isShared == true)
         );
         allow create: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
         ) && request.resource.data.authorId == request.auth.uid &&
         hasRequiredFields(['title', 'x', 'y', 'type', 'authorId', 'createdAt']) &&
         isValidStoryNode(request.resource.data);
         allow update: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
         ) && request.resource.data.authorId == resource.data.authorId &&
         request.resource.data.createdAt == resource.data.createdAt &&
         isValidStoryNode(request.resource.data);
         allow delete: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
         );
       }
 
       match /characters/{characterId} {
         allow read: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators) ||
-          get(/databases/$(database)/documents/stories/$(storyId)).data.isShared == true
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators) ||
+          ('isShared' in get(/databases/$(database)/documents/stories/$(storyId)).data && get(/databases/$(database)/documents/stories/$(storyId)).data.isShared == true)
         );
         allow create: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
         ) && request.resource.data.authorId == request.auth.uid &&
         hasRequiredFields(['name', 'authorId', 'createdAt']) &&
         isValidCharacter(request.resource.data);
         allow update: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
         ) && request.resource.data.authorId == resource.data.authorId &&
         request.resource.data.createdAt == resource.data.createdAt &&
         isValidCharacter(request.resource.data);
         allow delete: if isAuthenticated() && (
           get(/databases/$(database)/documents/stories/$(storyId)).data.authorId == request.auth.uid ||
-          (request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
+          ('collaborators' in get(/databases/$(database)/documents/stories/$(storyId)).data && request.auth.uid in get(/databases/$(database)/documents/stories/$(storyId)).data.collaborators)
         );
       }
     }

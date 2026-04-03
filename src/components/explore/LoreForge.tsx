@@ -171,8 +171,10 @@ export default function LoreForge() {
       setNewCharName('');
       setNewCharRole('');
       setIsAddingCharacter(false);
-    } catch (error) {
+      showToast('Character added successfully!', 'success');
+    } catch (error: any) {
       console.error("Error adding character:", error);
+      showToast(error.message || 'Failed to add character.', 'error');
     }
   };
 

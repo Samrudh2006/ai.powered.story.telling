@@ -122,8 +122,10 @@ export default function StoryBranch() {
       setNewNodeTitle('');
       setIsAddingNode(false);
       setSelectedParentId(undefined);
-    } catch (error) {
+      showToast('Branch created successfully!', 'success');
+    } catch (error: any) {
       console.error("Error adding node:", error);
+      showToast(error.message || 'Failed to create branch.', 'error');
     }
   };
 
