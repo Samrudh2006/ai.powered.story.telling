@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Plus, Sparkles, Share, Edit3, User, Activity, Clock, Map, FileText, ChevronRight, Zap, X, GitBranch, Trash2 } from 'lucide-react';
 import { db, auth } from '../../firebase';
-import { collection, query, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, or } from 'firebase/firestore';
 import { GoogleGenAI } from '@google/genai';
 
 interface Story {
@@ -44,7 +44,13 @@ export default function LoreForge() {
   useEffect(() => {
     if (!auth.currentUser) return;
     
-    const q = query(collection(db, 'stories'));
+    const q = query(
+      collection(db, 'stories'),
+      or(
+        where('authorId', '==', auth.currentUser.uid),
+        where('collaborators', 'array-contains', auth.currentUser.uid)
+      )
+    );
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const loadedStories: Story[] = [];
       snapshot.forEach((doc) => {

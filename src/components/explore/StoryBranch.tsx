@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Search, Plus, Users, LayoutGrid, List, Sparkles, GitBranch, Settings, Map, ZoomIn, ZoomOut, Maximize, ChevronRight, X, Trash2 } from 'lucide-react';
 import { db, auth } from '../../firebase';
-import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, arrayUnion } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, arrayUnion, or } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { GoogleGenAI } from '@google/genai';
 
@@ -51,7 +51,13 @@ export default function StoryBranch() {
     if (!auth.currentUser) return;
     
     // Listen to stories where user is author OR collaborator
-    const q = query(collection(db, 'stories'));
+    const q = query(
+      collection(db, 'stories'),
+      or(
+        where('authorId', '==', auth.currentUser.uid),
+        where('collaborators', 'array-contains', auth.currentUser.uid)
+      )
+    );
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       const loadedStories: Story[] = [];
@@ -97,17 +103,22 @@ export default function StoryBranch() {
       const startX = parentNode ? parentNode.x + 250 : 100;
       const startY = parentNode ? parentNode.y : 100;
 
-      await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), {
+      const nodeData: any = {
         title: newNodeTitle,
         content: '',
         x: startX + (Math.random() * 50 - 25),
         y: startY + (Math.random() * 100 - 50),
         type: activeTimeline === 'main' ? 'branch' : activeTimeline,
-        parentId: selectedParentId || null,
         authorId: auth.currentUser.uid,
         authorName: auth.currentUser.displayName || 'Anonymous',
         createdAt: Date.now()
-      });
+      };
+      
+      if (selectedParentId) {
+        nodeData.parentId = selectedParentId;
+      }
+
+      await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), nodeData);
       setNewNodeTitle('');
       setIsAddingNode(false);
       setSelectedParentId(undefined);
@@ -140,17 +151,22 @@ export default function StoryBranch() {
         const startX = parentNode ? parentNode.x + 250 : 100;
         const startY = parentNode ? parentNode.y + 150 : 100;
 
-        await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), {
+        const nodeData: any = {
           title: result.title,
           content: result.content,
           x: startX + (Math.random() * 50 - 25),
           y: startY + (Math.random() * 100 - 50),
           type: 'ai',
-          parentId: parentNode ? parentNode.id : null,
           authorId: auth.currentUser.uid,
           authorName: 'AI Assistant',
           createdAt: Date.now()
-        });
+        };
+        
+        if (parentNode) {
+          nodeData.parentId = parentNode.id;
+        }
+
+        await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), nodeData);
         showToast('AI suggestion added!', 'success');
         setActiveTimeline('ai');
       } else {
