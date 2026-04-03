@@ -3,7 +3,7 @@ import { Search, Plus, Users, LayoutGrid, List, Sparkles, GitBranch, Settings, M
 import { db, auth } from '../../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, arrayUnion, or } from 'firebase/firestore';
 import { motion } from 'motion/react';
-import { GoogleGenAI } from '@google/genai';
+import { parseAiJson } from '../../utils/parseAiJson';
 
 interface Story {
   id: string;
@@ -132,23 +132,29 @@ export default function StoryBranch() {
   const handleGenerateAISuggestion = async () => {
     if (!activeStoryId || !auth.currentUser) return;
     
-    // Get context from existing nodes
     const contextNodes = nodes.slice(-5).map(n => `${n.title}: ${n.content}`).join('\n');
     
     setIsGeneratingAI(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Based on this story context, suggest a new interesting plot branch or twist. Return ONLY a JSON object with 'title' (max 50 chars) and 'content' (max 300 chars).\n\nContext:\n${contextNodes}`,
-        config: {
-          responseMimeType: "application/json",
-        }
+      const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemPrompt: 'You are a creative story assistant. Return ONLY a raw JSON object with no markdown fences or extra text.',
+          messages: [
+            {
+              role: 'user',
+              content: `Based on this story context, suggest a new interesting plot branch or twist. Return ONLY a JSON object with "title" (max 50 chars) and "content" (max 300 chars).\n\nContext:\n${contextNodes}`,
+            },
+          ],
+        }),
       });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed');
+
+      const result = parseAiJson<{ title: string; content: string }>(data.text || '');
       
-      const result = JSON.parse(response.text || '{}');
-      
-      if (result.title && result.content) {
+      if (result?.title && result?.content) {
         const parentNode = nodes.length > 0 ? nodes[nodes.length - 1] : null;
         const startX = parentNode ? parentNode.x + 250 : 100;
         const startY = parentNode ? parentNode.y + 150 : 100;
@@ -176,11 +182,7 @@ export default function StoryBranch() {
       }
     } catch (error: any) {
       console.error("Error generating AI suggestion:", error);
-      if (error.message?.includes('API key not valid')) {
-        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
-      } else {
-        showToast('Failed to generate AI suggestion.', 'error');
-      }
+      showToast('Failed to generate AI suggestion.', 'error');
     }
     setIsGeneratingAI(false);
   };

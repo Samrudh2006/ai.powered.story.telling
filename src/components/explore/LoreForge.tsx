@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { Search, Plus, Sparkles, Share, Edit3, User, Activity, Clock, Map, FileText, ChevronRight, Zap, X, GitBranch, Trash2 } from 'lucide-react';
 import { db, auth } from '../../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, or } from 'firebase/firestore';
-import { GoogleGenAI } from '@google/genai';
 
 interface Story {
   id: string;
@@ -31,7 +30,7 @@ export default function LoreForge() {
   const [newCharName, setNewCharName] = useState('');
   const [newCharRole, setNewCharRole] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
+  const [generatedDescription, setGeneratedDescription] = useState<string | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [editCharData, setEditCharData] = useState({ name: '', role: '', description: '' });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
@@ -94,40 +93,37 @@ export default function LoreForge() {
     if (!activeCharacter) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            { text: `A high-quality character portrait for a story. Character Name: ${activeCharacter.name}. Description: ${activeCharacter.description}. Style: Digital Art, detailed, cinematic lighting.` }
-          ]
-        }
+      const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemPrompt: 'You are a professional concept artist and character designer. Write vivid, detailed visual descriptions of characters for storytellers. Be specific about physical features, clothing, lighting, and artistic style. Keep it under 200 words.',
+          messages: [
+            {
+              role: 'user',
+              content: `Write a detailed visual portrait description for this story character:\nName: ${activeCharacter.name}\nRole: ${activeCharacter.role}\nDescription: ${activeCharacter.description}\n\nDescribe their appearance as if painting a portrait: face, eyes, hair, expression, clothing, lighting, and mood.`,
+            },
+          ],
+          maxTokens: 512,
+        }),
       });
-
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          setGeneratedImageUrl(`data:image/png;base64,${part.inlineData.data}`);
-          break;
-        }
-      }
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed');
+      setGeneratedDescription(data.text || null);
     } catch (error: any) {
-      console.error("Error generating portrait:", error);
-      if (error.message?.includes('API key not valid')) {
-        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
-      } else {
-        showToast("Failed to generate portrait. Please try again.", 'error');
-      }
+      console.error("Error generating portrait description:", error);
+      showToast("Failed to generate portrait description. Please try again.", 'error');
     }
     setIsGenerating(false);
   };
 
   const handleSavePortrait = async () => {
-    if (!activeStoryId || !activeCharacterId || !generatedImageUrl) return;
+    if (!activeStoryId || !activeCharacterId || !generatedDescription) return;
     try {
       await updateDoc(doc(db, 'stories', activeStoryId, 'characters', activeCharacterId), {
-        imageUrl: generatedImageUrl
+        portraitDescription: generatedDescription,
       });
-      setGeneratedImageUrl(null);
+      setGeneratedDescription(null);
       setShowPortraitGenerator(false);
     } catch (error) {
       console.error("Error saving portrait:", error);
@@ -451,10 +447,12 @@ export default function LoreForge() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-8">
-            {generatedImageUrl && (
+            {generatedDescription && (
               <div className="mb-6">
-                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Preview</div>
-                <img src={generatedImageUrl} alt="Generated" className="w-full aspect-square rounded-xl border border-indigo-500 shadow-lg shadow-indigo-500/20" />
+                <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">AI Portrait Description</div>
+                <div className="w-full rounded-xl border border-indigo-500 shadow-lg shadow-indigo-500/20 bg-indigo-500/5 p-4">
+                  <p className="text-sm text-gray-300 leading-relaxed italic">{generatedDescription}</p>
+                </div>
               </div>
             )}
             <div>
@@ -507,7 +505,7 @@ export default function LoreForge() {
             </button>
             <button 
               onClick={handleSavePortrait}
-              disabled={!generatedImageUrl}
+              disabled={!generatedDescription}
               className="w-full py-3 rounded-xl border border-white/10 hover:bg-white/5 disabled:opacity-50 transition-colors text-sm font-bold text-white"
             >
               Save as Current
