@@ -4,7 +4,6 @@ import { Book, History, Share, CheckCircle, Plus, Settings, Sparkles, Edit3, Wan
 import { db, auth } from '../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
-import { GoogleGenAI } from '@google/genai';
 
 export default function Editor() {
   const { id } = useParams();
@@ -221,22 +220,22 @@ export default function Editor() {
     if (!promptToUse.trim()) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
-      const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Context from the story:\n${content.slice(-2000)}\n\nUser Request: ${promptToUse}`,
-        config: {
-          systemInstruction: "You are an expert creative writing assistant, 'LoreForge Muse'. Provide helpful, creative, and concise suggestions, rewrites, or analysis based on the user's request and the provided story context. Do not include markdown formatting like bolding or italics unless specifically asked."
-        }
+      const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemPrompt: "You are an expert creative writing assistant called 'LoreForge Muse'. Provide helpful, creative, and concise suggestions, rewrites, or analysis based on the user's request and the provided story context. Do not use markdown formatting like bold or italics unless specifically asked.",
+          messages: [
+            { role: 'user', content: `Context from the story:\n${content.slice(-2000)}\n\nUser Request: ${promptToUse}` }
+          ],
+        }),
       });
-      setSuggestion(response.text || "I couldn't think of anything right now.");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed');
+      setSuggestion(data.text || "I couldn't think of anything right now.");
     } catch (e: any) {
       console.error(e);
-      if (e.message?.includes('API key not valid')) {
-        setSuggestion("Invalid Gemini API Key. Please check your environment variables.");
-      } else {
-        setSuggestion("Error connecting to Muse. Please try again later.");
-      }
+      setSuggestion("Error connecting to Muse. Please try again later.");
     }
     setIsGenerating(false);
     if (!overridePrompt) {

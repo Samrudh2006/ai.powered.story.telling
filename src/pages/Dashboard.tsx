@@ -4,6 +4,7 @@ import { Book, Users, Compass, Settings, Plus, Search, Bell, BrainCircuit, Star,
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
 import { collection, query, where, onSnapshot, addDoc, or } from 'firebase/firestore';
+import { parseAiJson } from '../utils/parseAiJson';
 
 export default function Dashboard() {
   const { user, userProfile, logout } = useAuth();
@@ -11,6 +12,7 @@ export default function Dashboard() {
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [view, setView] = useState<'my-stories' | 'shared' | 'storybranch' | 'loreforge' | 'portrait' | 'settings' | 'profile'>('my-stories');
+  const [aiRecommendations, setAiRecommendations] = useState<{ text: string; type: string }[]>([]);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -40,6 +42,35 @@ export default function Dashboard() {
 
     return () => unsubscribe();
   }, [user]);
+
+  useEffect(() => {
+    if (stories.length === 0) return;
+    const storyContext = stories.slice(0, 5)
+      .map((s: any) => `"${s.title}" (${s.genre || 'Fiction'})`)
+      .join(', ');
+    fetch('/api/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        systemPrompt: 'You are a creative writing coach. Return ONLY a raw JSON object with no markdown fences or extra text.',
+        messages: [
+          {
+            role: 'user',
+            content: `A writer is working on these stories: ${storyContext}. Generate 2 short, inspiring creative writing suggestions to spark their imagination. Return ONLY this JSON: {"suggestions":[{"text":"...","type":"Hook"},{"text":"...","type":"Character Trait"}]}. Each suggestion text should be one vivid sentence (max 25 words). Types can be: Hook, Character Trait, Plot Twist, World Building, Dialogue Prompt.`,
+          },
+        ],
+        maxTokens: 256,
+      }),
+    })
+      .then(r => r.json())
+      .then(data => {
+        const result = parseAiJson<{ suggestions: { text: string; type: string }[] }>(data.text || '');
+        if (result?.suggestions && Array.isArray(result.suggestions)) {
+          setAiRecommendations(result.suggestions.slice(0, 2));
+        }
+      })
+      .catch((err) => { console.error('Failed to fetch AI recommendations:', err); });
+  }, [stories]);
 
   const createNewStory = async () => {
     if (!user) return;
@@ -395,18 +426,29 @@ export default function Dashboard() {
             <h4 className="font-bold text-lg">AI Recommendations</h4>
           </div>
           <div className="space-y-4">
-            <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl hover:bg-primary/10 transition-colors cursor-pointer group">
-              <p className="text-sm font-medium leading-relaxed text-slate-300">"What if your protagonist discovers a map leading to a city that technically doesn't exist on any record?"</p>
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-primary uppercase">Mystery Hook</span>
+            {aiRecommendations.length > 0 ? aiRecommendations.map((rec, i) => (
+              <div key={i} className="p-4 bg-primary/5 border border-primary/20 rounded-xl hover:bg-primary/10 transition-colors cursor-pointer group">
+                <p className="text-sm font-medium leading-relaxed text-slate-300">"{rec.text}"</p>
+                <div className="mt-3 flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-primary uppercase">{rec.type}</span>
+                </div>
               </div>
-            </div>
-            <div className="p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl hover:bg-indigo-500/10 transition-colors cursor-pointer group">
-              <p className="text-sm font-medium leading-relaxed text-slate-300">"Try introducing a character who only speaks in metaphors related to old clockwork."</p>
-              <div className="mt-3 flex items-center justify-between">
-                <span className="text-[10px] font-bold text-indigo-500 uppercase">Character Trait</span>
-              </div>
-            </div>
+            )) : (
+              <>
+                <div className="p-4 bg-primary/5 border border-primary/20 rounded-xl hover:bg-primary/10 transition-colors cursor-pointer group">
+                  <p className="text-sm font-medium leading-relaxed text-slate-300">"What if your protagonist discovers a map leading to a city that technically doesn't exist on any record?"</p>
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-primary uppercase">Mystery Hook</span>
+                  </div>
+                </div>
+                <div className="p-4 bg-indigo-500/5 border border-indigo-500/20 rounded-xl hover:bg-indigo-500/10 transition-colors cursor-pointer group">
+                  <p className="text-sm font-medium leading-relaxed text-slate-300">"Try introducing a character who only speaks in metaphors related to old clockwork."</p>
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-indigo-500 uppercase">Character Trait</span>
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </div>
 

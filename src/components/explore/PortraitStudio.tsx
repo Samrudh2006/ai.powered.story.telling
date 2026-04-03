@@ -1,6 +1,11 @@
 import React, { useState } from 'react';
-import { Grid, List, Sparkles } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { Sparkles } from 'lucide-react';
+import { parseAiJson } from '../../utils/parseAiJson';
+
+interface PortraitVariation {
+  style: string;
+  description: string;
+}
 
 export default function PortraitStudio() {
   const [prompt, setPrompt] = useState('');
@@ -8,12 +13,7 @@ export default function PortraitStudio() {
   const [mood, setMood] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
-  const [results, setResults] = useState<string[]>([
-    'https://picsum.photos/seed/portrait1/400/500',
-    'https://picsum.photos/seed/portrait2/400/500',
-    'https://picsum.photos/seed/portrait3/400/500',
-    'https://picsum.photos/seed/portrait4/400/500',
-  ]);
+  const [variations, setVariations] = useState<PortraitVariation[]>([]);
 
   const showToast = (message: string, type: 'success' | 'error') => {
     setToast({ message, type });
@@ -24,41 +24,33 @@ export default function PortraitStudio() {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
-      const fullPrompt = `${prompt}, style: ${style}, mood: ${mood}`;
-      
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            { text: fullPrompt }
-          ]
-        }
+      const otherStyles = ['Oil Painting', 'Digital Art', 'Sketch', 'Cinematic'].filter(s => s !== style);
+      const orderedStyles = [style, ...otherStyles];
+      const response = await fetch('/api/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemPrompt: 'You are a professional concept artist. Write vivid portrait descriptions for storytellers. Return ONLY a raw JSON object with no markdown fences.',
+          messages: [
+            {
+              role: 'user',
+              content: `Create 4 distinct portrait descriptions for this character: ${prompt}${mood ? `, mood: ${mood}` : ''}. Use these styles in this order: ${orderedStyles.join(', ')}. Return ONLY a JSON object: {"variations":[{"style":"${orderedStyles[0]}","description":"..."},{"style":"${orderedStyles[1]}","description":"..."},{"style":"${orderedStyles[2]}","description":"..."},{"style":"${orderedStyles[3]}","description":"..."}]}. Each description should be 60-100 words and vividly describe the character's appearance and atmosphere in that style.`,
+            },
+          ],
+          maxTokens: 1024,
+        }),
       });
-      
-      const newResults: string[] = [];
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-          const base64EncodeString = part.inlineData.data;
-          const imageUrl = `data:image/png;base64,${base64EncodeString}`;
-          newResults.push(imageUrl);
-        }
-      }
-      
-      if (newResults.length > 0) {
-        // Pad with placeholders if less than 4
-        while (newResults.length < 4) {
-          newResults.push(`https://picsum.photos/seed/${Math.random()}/400/500`);
-        }
-        setResults(newResults.slice(0, 4));
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Request failed');
+      const result = parseAiJson<{ variations: { style: string; description: string }[] }>(data.text || '');
+      if (result?.variations && Array.isArray(result.variations)) {
+        setVariations(result.variations.slice(0, 4));
+      } else {
+        throw new Error('Unexpected response format');
       }
     } catch (e: any) {
-      console.error("Error generating image:", e);
-      if (e.message?.includes('API key not valid')) {
-        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
-      } else {
-        showToast("Failed to generate portrait. Please try again.", 'error');
-      }
+      console.error("Error generating portrait descriptions:", e);
+      showToast("Failed to generate portraits. Please try again.", 'error');
     }
     setIsGenerating(false);
   };
@@ -154,38 +146,42 @@ export default function PortraitStudio() {
         {/* Header */}
         <div className="h-20 border-b border-white/5 flex items-center justify-between px-8 shrink-0">
           <div>
-            <h2 className="text-2xl font-bold text-white mb-1">Generated Results</h2>
-            <p className="text-sm text-gray-500">Found 4 variations based on your creative prompt.</p>
-          </div>
-          <div className="flex items-center gap-2 bg-[#1A1C23] border border-white/10 rounded-lg p-1">
-            <button className="p-2 rounded bg-white/10 text-white shadow-sm">
-              <Grid size={16} />
-            </button>
-            <button className="p-2 rounded text-gray-500 hover:text-white transition-colors">
-              <List size={16} />
-            </button>
+            <h2 className="text-2xl font-bold text-white mb-1">Generated Portrait Descriptions</h2>
+            <p className="text-sm text-gray-500">
+              {variations.length > 0
+                ? `${variations.length} AI-generated style variations for your character.`
+                : 'Describe your character on the left and click Generate.'}
+            </p>
           </div>
         </div>
 
-        {/* Grid */}
+        {/* Descriptions Grid */}
         <div className="flex-1 overflow-y-auto p-8">
-          <div className="grid grid-cols-2 gap-6 max-w-5xl mx-auto">
-            {results.map((url, i) => (
-              <div key={i} className="aspect-[4/5] rounded-2xl overflow-hidden border border-white/10 relative group bg-[#1A1C23]">
-                <img src={url} alt={`Generated portrait ${i + 1}`} className="w-full h-full object-cover" />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-6">
-                  <div className="flex gap-3">
-                    <button className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-colors">
-                      Save to Profile
-                    </button>
-                    <button className="px-4 py-2.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white rounded-xl text-sm font-bold transition-colors">
-                      Variations
-                    </button>
+          {variations.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-full text-gray-600 gap-4">
+              <Sparkles size={40} />
+              <p className="text-sm font-medium">Your AI portrait descriptions will appear here.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-6 max-w-5xl mx-auto">
+              {variations.map((v, i) => (
+                <div key={i} className="rounded-2xl border border-white/10 bg-[#1A1C23] p-6 flex flex-col gap-4 hover:border-indigo-500/40 transition-colors">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2 py-0.5 rounded-full bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold uppercase tracking-wider">
+                      {v.style}
+                    </span>
                   </div>
+                  <p className="text-sm text-gray-300 leading-relaxed flex-1 italic">{v.description}</p>
+                  <button
+                    onClick={() => navigator.clipboard.writeText(v.description).then(() => showToast('Copied!', 'success'))}
+                    className="self-start px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-gray-400 hover:text-white text-xs font-medium transition-colors"
+                  >
+                    Copy Description
+                  </button>
                 </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Footer Status */}
@@ -193,11 +189,11 @@ export default function PortraitStudio() {
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-green-400"></div>
-              AI Engine Online: GPT-V4 & Diffusion XL
+              AI Engine Online: Gemma 3 27B via NVIDIA
             </div>
             <div className="flex items-center gap-2">
               <Sparkles size={12} />
-              Average Gen Time: 8.4s
+              4 Style Variations
             </div>
           </div>
           <div className="flex items-center gap-6">
