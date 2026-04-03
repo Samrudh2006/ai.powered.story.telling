@@ -1,12 +1,19 @@
-import React, { useState } from 'react';
-import { Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { ArrowLeft, GitBranch, Users, Image as ImageIcon } from 'lucide-react';
 import StoryBranch from '../components/explore/StoryBranch';
 import LoreForge from '../components/explore/LoreForge';
 import PortraitStudio from '../components/explore/PortraitStudio';
 
 export default function Explore() {
+  const location = useLocation();
   const [activeTab, setActiveTab] = useState<'storybranch' | 'loreforge' | 'portrait'>('storybranch');
+
+  useEffect(() => {
+    if (location.state && location.state.tab) {
+      setActiveTab(location.state.tab);
+    }
+  }, [location]);
 
   return (
     <div className="min-h-screen bg-[#0B0C10] text-white flex flex-col font-sans">

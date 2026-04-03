@@ -1,12 +1,23 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { Book, History, Share, CheckCircle, Plus, Settings, Sparkles, Edit3, Wand2, UserSearch, RefreshCw, Send, Maximize2, Minimize2, Bold, Italic, Copy, X } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { Book, History, Share, CheckCircle, Plus, Settings, Sparkles, Edit3, Wand2, UserSearch, RefreshCw, Send, Maximize2, Minimize2, Bold, Italic, Copy, X, Users, Ghost } from 'lucide-react';
+import { db, auth } from '../firebase';
+import { doc, getDoc, updateDoc, onSnapshot, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
+import { useAuth } from '../contexts/AuthContext';
+import { GoogleGenAI } from '@google/genai';
 
 export default function Editor() {
   const { id } = useParams();
+  const { user } = useAuth();
+  const navigate = useNavigate();
   const [story, setStory] = useState<any>(null);
   const [content, setContent] = useState('');
   const [title, setTitle] = useState('');
+  const [chapters, setChapters] = useState<{id: string, title: string, content: string}[]>([]);
+  const [activeChapterId, setActiveChapterId] = useState<string>('');
+  const [editingChapterId, setEditingChapterId] = useState<string | null>(null);
+  const [editChapterTitle, setEditChapterTitle] = useState('');
+  const chaptersLoaded = useRef(false);
   const [aiInput, setAiInput] = useState('');
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -14,78 +25,169 @@ export default function Editor() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showShare, setShowShare] = useState(false);
+  const [activeRightTab, setActiveRightTab] = useState<'muse' | 'characters'>('muse');
+  const [characters, setCharacters] = useState<any[]>([]);
+  const [collabEmail, setCollabEmail] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [chapterToDelete, setChapterToDelete] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    fetch(`/api/stories/${id}`)
-      .then(res => res.json())
-      .then(data => {
-        setStory(data);
-        setTitle(data.title);
-        setContent(data.content);
-      });
+    if (!id) return;
+    chaptersLoaded.current = false;
+
+    const docRef = doc(db, 'stories', id);
+    const unsubscribe = onSnapshot(docRef, (docSnap) => {
+      if (docSnap.exists()) {
+        const data = docSnap.data();
+        setStory({ _id: docSnap.id, ...data });
+        
+        if (!chaptersLoaded.current) {
+          let loadedChapters = data.chapters;
+          if (!loadedChapters || loadedChapters.length === 0) {
+            loadedChapters = [{ id: '1', title: 'Chapter 1', content: data.content || '' }];
+          }
+          setChapters(loadedChapters);
+          setActiveChapterId(loadedChapters[0].id);
+          setContent(loadedChapters[0].content);
+          setTitle(data.title || '');
+          chaptersLoaded.current = true;
+        }
+      } else {
+        navigate('/');
+      }
+    }, (error) => {
+      console.error("Error fetching story:", error);
+    });
+
+    return () => unsubscribe();
+  }, [id, navigate]);
+
+  useEffect(() => {
+    if (!id) return;
+    const q = query(collection(db, 'stories', id, 'characters'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setCharacters(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+    return () => unsubscribe();
   }, [id]);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
 
   const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const newContent = e.target.value;
     setContent(newContent);
-    scheduleSave(title, newContent);
+    const updatedChapters = chapters.map(ch => 
+      ch.id === activeChapterId ? { ...ch, content: newContent } : ch
+    );
+    setChapters(updatedChapters);
+    scheduleSave(title, updatedChapters);
   };
 
   const handleTitleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newTitle = e.target.value;
     setTitle(newTitle);
-    scheduleSave(newTitle, content);
+    scheduleSave(newTitle, chapters);
   };
 
-  const scheduleSave = (t: string, c: string) => {
+  const scheduleSave = (t: string, chaps: any[]) => {
     setSaveStatus('saving');
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
     saveTimeoutRef.current = setTimeout(async () => {
+      if (!id || !user) return;
       try {
-        await fetch(`/api/stories/${id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ title: t, content: c, wordCount: c.split(/\s+/).filter(w => w.length > 0).length })
+        const docRef = doc(db, 'stories', id);
+        const totalWords = chaps.reduce((acc, ch) => acc + (ch.content ? ch.content.split(/\s+/).filter((w: string) => w.length > 0).length : 0), 0);
+        await updateDoc(docRef, {
+          title: t,
+          chapters: chaps,
+          content: chaps[0]?.content || '',
+          wordCount: totalWords,
+          updatedAt: Date.now()
         });
         setSaveStatus('saved');
       } catch (e) {
+        console.error("Error saving:", e);
         setSaveStatus('error');
       }
     }, 1000);
   };
 
+  const addChapter = () => {
+    const newId = Date.now().toString();
+    const newChapter = { id: newId, title: `Chapter ${chapters.length + 1}`, content: '' };
+    const updatedChapters = [...chapters, newChapter];
+    setChapters(updatedChapters);
+    setActiveChapterId(newId);
+    setContent('');
+    scheduleSave(title, updatedChapters);
+  };
+
+  const switchChapter = (chapterId: string) => {
+    const chapter = chapters.find(ch => ch.id === chapterId);
+    if (chapter) {
+      setActiveChapterId(chapterId);
+      setContent(chapter.content);
+    }
+  };
+
+  const renameChapter = (chapterId: string, currentTitle: string) => {
+    setEditingChapterId(chapterId);
+    setEditChapterTitle(currentTitle);
+  };
+
+  const saveChapterRename = (chapterId: string) => {
+    if (editingChapterId === null) return; // Prevent double calls
+    if (editChapterTitle.trim()) {
+      const updatedChapters = chapters.map(ch => 
+        ch.id === chapterId ? { ...ch, title: editChapterTitle.trim() } : ch
+      );
+      setChapters(updatedChapters);
+      scheduleSave(title, updatedChapters);
+    }
+    setEditingChapterId(null);
+  };
+
   const saveVersion = async () => {
+    if (!id || !user) return;
     try {
-      const res = await fetch(`/api/stories/${id}/versions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content })
+      const docRef = doc(db, 'stories', id);
+      await updateDoc(docRef, {
+        versions: arrayUnion({
+          content,
+          timestamp: Date.now()
+        }),
+        updatedAt: Date.now()
       });
-      const updatedStory = await res.json();
-      setStory(updatedStory);
-      alert('Version saved successfully!');
+      showToast('Version saved successfully!', 'success');
     } catch (e) {
-      alert('Failed to save version.');
+      console.error(e);
+      showToast('Failed to save version.', 'error');
     }
   };
 
   const restoreVersion = (versionContent: string) => {
     setContent(versionContent);
-    scheduleSave(title, versionContent);
+    const updatedChapters = chapters.map(ch => 
+      ch.id === activeChapterId ? { ...ch, content: versionContent } : ch
+    );
+    setChapters(updatedChapters);
+    scheduleSave(title, updatedChapters);
     setShowHistory(false);
   };
 
   const toggleShare = async () => {
+    if (!id || !user) return;
     try {
-      const res = await fetch(`/api/stories/${id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isShared: !story.isShared })
+      const docRef = doc(db, 'stories', id);
+      await updateDoc(docRef, {
+        isShared: !story.isShared,
+        updatedAt: Date.now()
       });
-      const updatedStory = await res.json();
-      setStory(updatedStory);
     } catch (e) {
       console.error(e);
     }
@@ -98,7 +200,12 @@ export default function Editor() {
     const selectedText = content.substring(start, end);
     const newContent = content.substring(0, start) + prefix + selectedText + suffix + content.substring(end);
     setContent(newContent);
-    scheduleSave(title, newContent);
+    
+    const updatedChapters = chapters.map(ch => 
+      ch.id === activeChapterId ? { ...ch, content: newContent } : ch
+    );
+    setChapters(updatedChapters);
+    scheduleSave(title, updatedChapters);
     
     // Reset selection after state update
     setTimeout(() => {
@@ -109,22 +216,32 @@ export default function Editor() {
     }, 0);
   };
 
-  const askMuse = async () => {
-    if (!aiInput.trim()) return;
+  const askMuse = async (overridePrompt?: string) => {
+    const promptToUse = overridePrompt || aiInput;
+    if (!promptToUse.trim()) return;
     setIsGenerating(true);
     try {
-      const res = await fetch('/api/ai/suggest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ context: content.slice(-1000), prompt: aiInput })
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Context from the story:\n${content.slice(-2000)}\n\nUser Request: ${promptToUse}`,
+        config: {
+          systemInstruction: "You are an expert creative writing assistant, 'LoreForge Muse'. Provide helpful, creative, and concise suggestions, rewrites, or analysis based on the user's request and the provided story context. Do not include markdown formatting like bolding or italics unless specifically asked."
+        }
       });
-      const data = await res.json();
-      setSuggestion(data.suggestion);
-    } catch (e) {
+      setSuggestion(response.text || "I couldn't think of anything right now.");
+    } catch (e: any) {
       console.error(e);
+      if (e.message?.includes('API key not valid')) {
+        setSuggestion("Invalid Gemini API Key. Please check your environment variables.");
+      } else {
+        setSuggestion("Error connecting to Muse. Please try again later.");
+      }
     }
     setIsGenerating(false);
-    setAiInput('');
+    if (!overridePrompt) {
+      setAiInput('');
+    }
   };
 
   const insertSuggestion = () => {
@@ -132,7 +249,35 @@ export default function Editor() {
       const newContent = content + '\n\n' + suggestion;
       setContent(newContent);
       setSuggestion(null);
-      scheduleSave(title, newContent);
+      
+      const updatedChapters = chapters.map(ch => 
+        ch.id === activeChapterId ? { ...ch, content: newContent } : ch
+      );
+      setChapters(updatedChapters);
+      scheduleSave(title, updatedChapters);
+    }
+  };
+
+  const handleAddCollaborator = async () => {
+    if (!id || !collabEmail.trim()) return;
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', collabEmail.trim()));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const userId = querySnapshot.docs[0].id;
+        await updateDoc(doc(db, 'stories', id), {
+          collaborators: arrayUnion(userId)
+        });
+        setCollabEmail('');
+        showToast('Collaborator added successfully!', 'success');
+      } else {
+        showToast('User not found with that email.', 'error');
+      }
+    } catch (error) {
+      console.error("Error adding collaborator:", error);
+      showToast('Failed to add collaborator.', 'error');
     }
   };
 
@@ -183,16 +328,51 @@ export default function Editor() {
         {!isFullscreen && (
           <aside className="w-64 border-r border-border-dark p-4 hidden xl:flex flex-col gap-4 bg-[#121118]">
             <div className="text-xs font-bold text-slate-500 uppercase tracking-widest">Chapters</div>
-            <nav className="flex flex-col gap-1">
-              <a href="#" className="px-3 py-2 rounded-lg bg-primary/10 text-primary font-medium text-sm flex items-center justify-between">
-                <span>1. The Beginning</span>
-                <CheckCircle size={14} />
-              </a>
-              <a href="#" className="px-3 py-2 rounded-lg hover:bg-surface-dark text-slate-400 text-sm">
-                2. The Journey
-              </a>
+            <nav className="flex flex-col gap-1 overflow-y-auto flex-1">
+              {chapters.map((chap) => (
+                <div 
+                  key={chap.id} 
+                  className={`group flex items-center justify-between px-3 py-2 rounded-lg cursor-pointer transition-colors ${activeChapterId === chap.id ? 'bg-primary/10 text-primary font-medium' : 'hover:bg-surface-dark text-slate-400'}`} 
+                  onClick={() => {
+                    if (editingChapterId !== chap.id) switchChapter(chap.id);
+                  }}
+                >
+                  {editingChapterId === chap.id ? (
+                    <input
+                      type="text"
+                      value={editChapterTitle}
+                      onChange={(e) => setEditChapterTitle(e.target.value)}
+                      onBlur={() => saveChapterRename(chap.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveChapterRename(chap.id);
+                        if (e.key === 'Escape') setEditingChapterId(null);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      autoFocus
+                      className="bg-bg-dark text-white text-sm px-2 py-1 rounded border border-primary outline-none w-full"
+                    />
+                  ) : (
+                    <>
+                      <span className="text-sm truncate pr-2 flex-1">{chap.title}</span>
+                      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button onClick={(e) => { e.stopPropagation(); renameChapter(chap.id, chap.title); }} className="p-1 hover:text-white transition-colors" title="Rename Chapter">
+                          <Edit3 size={12} />
+                        </button>
+                        {chapters.length > 1 && (
+                          <button onClick={(e) => { 
+                            e.stopPropagation(); 
+                            setChapterToDelete(chap.id);
+                          }} className="p-1 hover:text-red-400 transition-colors" title="Delete Chapter">
+                            <X size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              ))}
             </nav>
-            <button className="mt-2 flex items-center gap-2 px-3 py-2 text-slate-400 hover:text-white text-sm transition-colors">
+            <button onClick={addChapter} className="mt-2 flex items-center justify-center gap-2 px-3 py-2 text-slate-400 hover:text-white text-sm transition-colors border border-dashed border-border-dark rounded-lg hover:border-slate-500">
               <Plus size={16} /> Add Chapter
             </button>
           </aside>
@@ -228,9 +408,21 @@ export default function Editor() {
         {!isFullscreen && (
           <aside className="w-80 border-l border-border-dark bg-[#121118] flex flex-col z-10">
           <div className="p-4 border-b border-border-dark flex items-center justify-between">
-            <div className="flex items-center gap-2 font-bold text-sm text-primary">
-              <Sparkles size={18} />
-              AI MUSE
+            <div className="flex items-center gap-4">
+              <button 
+                onClick={() => setActiveRightTab('muse')}
+                className={`flex items-center gap-2 font-bold text-xs transition-colors ${activeRightTab === 'muse' ? 'text-primary' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <Sparkles size={16} />
+                MUSE
+              </button>
+              <button 
+                onClick={() => setActiveRightTab('characters')}
+                className={`flex items-center gap-2 font-bold text-xs transition-colors ${activeRightTab === 'characters' ? 'text-primary' : 'text-slate-500 hover:text-slate-300'}`}
+              >
+                <Users size={16} />
+                LORE
+              </button>
             </div>
             <button className="text-slate-400 hover:text-slate-100">
               <Settings size={18} />
@@ -238,82 +430,114 @@ export default function Editor() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
-            {/* Quick Actions */}
-            <div className="grid grid-cols-1 gap-2">
-              <button onClick={() => { setAiInput("Suggest the next 2 paragraphs"); askMuse(); }} className="flex items-center gap-3 w-full p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary transition-all text-left group">
-                <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
-                  <Edit3 size={18} />
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs font-bold text-slate-200">Suggest Next</div>
-                  <div className="text-[10px] text-slate-500">Generate 2 paragraphs</div>
-                </div>
-              </button>
-              <button onClick={() => { setAiInput("Rewrite the last paragraph to be more dramatic and dark"); askMuse(); }} className="flex items-center gap-3 w-full p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary transition-all text-left group">
-                <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
-                  <Wand2 size={18} />
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs font-bold text-slate-200">Fix Tone</div>
-                  <div className="text-[10px] text-slate-500">Shift to Dramatic Noir</div>
-                </div>
-              </button>
-              <button onClick={() => { setAiInput("Analyze the main character's arc so far"); askMuse(); }} className="flex items-center gap-3 w-full p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary transition-all text-left group">
-                <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
-                  <UserSearch size={18} />
-                </div>
-                <div className="flex-1">
-                  <div className="text-xs font-bold text-slate-200">Character Dev</div>
-                  <div className="text-[10px] text-slate-500">Analyze arc</div>
-                </div>
-              </button>
-            </div>
-
-            {suggestion && (
+            {activeRightTab === 'muse' ? (
               <>
-                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-4">Live Suggestion</div>
-                <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 shadow-[0_0_20px_rgba(50,17,212,0.15)]">
-                  <div className="flex items-center justify-between mb-3">
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary text-white font-bold">AI GENERATED</span>
-                    <button onClick={askMuse} className="w-6 h-6 rounded flex items-center justify-center bg-white/10 hover:bg-white/20 text-white">
-                      <RefreshCw size={12} />
-                    </button>
-                  </div>
-                  <p className="text-sm text-slate-300 leading-relaxed mb-4 font-serif">
-                    {suggestion}
-                  </p>
-                  <div className="flex gap-2">
-                    <button onClick={insertSuggestion} className="flex-1 py-2 bg-primary text-white rounded-lg text-xs font-bold hover:opacity-90 transition-opacity">Insert</button>
-                    <button onClick={() => setSuggestion(null)} className="px-3 py-2 bg-surface-dark text-slate-300 rounded-lg text-xs font-bold hover:bg-border-dark transition-colors">Discard</button>
-                  </div>
+                {/* Quick Actions */}
+                <div className="grid grid-cols-1 gap-2">
+                  <button onClick={() => askMuse("Suggest the next 2 paragraphs")} className="flex items-center gap-3 w-full p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary transition-all text-left group">
+                    <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500">
+                      <Edit3 size={18} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs font-bold text-slate-200">Suggest Next</div>
+                      <div className="text-[10px] text-slate-500">Generate 2 paragraphs</div>
+                    </div>
+                  </button>
+                  <button onClick={() => askMuse("Rewrite the last paragraph to be more dramatic and dark")} className="flex items-center gap-3 w-full p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary transition-all text-left group">
+                    <div className="p-2 rounded-lg bg-purple-500/10 text-purple-500">
+                      <Wand2 size={18} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs font-bold text-slate-200">Fix Tone</div>
+                      <div className="text-[10px] text-slate-500">Shift to Dramatic Noir</div>
+                    </div>
+                  </button>
+                  <button onClick={() => askMuse("Analyze the main character's arc so far")} className="flex items-center gap-3 w-full p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary transition-all text-left group">
+                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500">
+                      <UserSearch size={18} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-xs font-bold text-slate-200">Character Dev</div>
+                      <div className="text-[10px] text-slate-500">Analyze arc</div>
+                    </div>
+                  </button>
                 </div>
+
+                {suggestion && (
+                  <>
+                    <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mt-4">Live Suggestion</div>
+                    <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 shadow-[0_0_20px_rgba(50,17,212,0.15)]">
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary text-white font-bold">AI GENERATED</span>
+                        <button onClick={askMuse} className="w-6 h-6 rounded flex items-center justify-center bg-white/10 hover:bg-white/20 text-white">
+                          <RefreshCw size={12} />
+                        </button>
+                      </div>
+                      <p className="text-sm text-slate-300 leading-relaxed mb-4 font-serif">
+                        {suggestion}
+                      </p>
+                      <div className="flex gap-2">
+                        <button onClick={insertSuggestion} className="flex-1 py-2 bg-primary text-white rounded-lg text-xs font-bold hover:opacity-90 transition-opacity">Insert</button>
+                        <button onClick={() => setSuggestion(null)} className="px-3 py-2 bg-surface-dark text-slate-300 rounded-lg text-xs font-bold hover:bg-border-dark transition-colors">Discard</button>
+                      </div>
+                    </div>
+                  </>
+                )}
+                
+                {isGenerating && (
+                  <div className="p-4 rounded-xl bg-surface-dark border border-border-dark flex items-center justify-center">
+                    <RefreshCw className="animate-spin text-primary" size={20} />
+                    <span className="ml-2 text-sm text-slate-400">Muse is thinking...</span>
+                  </div>
+                )}
               </>
-            )}
-            
-            {isGenerating && (
-              <div className="p-4 rounded-xl bg-surface-dark border border-border-dark flex items-center justify-center">
-                <RefreshCw className="animate-spin text-primary" size={20} />
-                <span className="ml-2 text-sm text-slate-400">Muse is thinking...</span>
+            ) : (
+              <div className="space-y-4">
+                <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Story Characters</div>
+                {characters.length === 0 ? (
+                  <div className="p-8 text-center bg-surface-dark rounded-xl border border-border-dark">
+                    <Ghost size={32} className="mx-auto text-slate-600 mb-3" />
+                    <p className="text-xs text-slate-500">No characters defined yet. Visit LoreForge to create some!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {characters.map(char => (
+                      <div key={char.id} className="p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary/30 transition-all">
+                        <div className="flex items-center gap-3 mb-2">
+                          <div className="w-8 h-8 rounded-full bg-cover bg-center border border-white/10" style={{ backgroundImage: `url(${char.imageUrl})` }}></div>
+                          <div>
+                            <div className="text-xs font-bold text-white">{char.name}</div>
+                            <div className="text-[10px] text-slate-500 uppercase tracking-wider">{char.role}</div>
+                          </div>
+                        </div>
+                        <p className="text-[11px] text-slate-400 line-clamp-2 leading-relaxed italic">"{char.description}"</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <Link to="/explore" state={{ tab: 'loreforge' }} className="block w-full py-2 text-center text-xs font-bold text-primary hover:underline">Open LoreForge AI</Link>
               </div>
             )}
           </div>
 
           {/* AI Input Box */}
-          <div className="p-4 border-t border-border-dark bg-surface-dark">
-            <div className="relative">
-              <textarea 
-                value={aiInput}
-                onChange={e => setAiInput(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askMuse(); } }}
-                className="w-full bg-bg-dark border border-border-dark rounded-xl text-xs text-white focus:ring-1 focus:ring-primary focus:border-primary p-3 pr-10 resize-none outline-none" 
-                placeholder="Ask Muse for anything..." 
-                rows={2}
-              />
-              <button onClick={askMuse} disabled={isGenerating || !aiInput.trim()} className="absolute right-3 bottom-3 text-primary disabled:text-slate-600 hover:text-primary-hover transition-colors">
-                <Send size={16} />
-              </button>
+          {activeRightTab === 'muse' && (
+            <div className="p-4 border-t border-border-dark bg-surface-dark">
+              <div className="relative">
+                <textarea 
+                  value={aiInput}
+                  onChange={e => setAiInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); askMuse(); } }}
+                  className="w-full bg-bg-dark border border-border-dark rounded-xl text-xs text-white focus:ring-1 focus:ring-primary focus:border-primary p-3 pr-10 resize-none outline-none" 
+                  placeholder="Ask Muse for anything..." 
+                  rows={2}
+                />
+                <button onClick={askMuse} disabled={isGenerating || !aiInput.trim()} className="absolute right-3 bottom-3 text-primary disabled:text-slate-600 hover:text-primary-hover transition-colors">
+                  <Send size={16} />
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </aside>
         )}
       </main>
@@ -323,7 +547,7 @@ export default function Editor() {
         <footer className="h-8 border-t border-border-dark bg-[#121118] px-4 flex items-center justify-between text-[10px] text-slate-400 font-medium z-20">
           <div className="flex items-center gap-4">
             <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500"></span> Connected</span>
-            <span>Words: {content.split(/\s+/).filter(w => w.length > 0).length}</span>
+            <span>Words: {chapters.reduce((acc, ch) => acc + (ch.content ? ch.content.split(/\s+/).filter((w: string) => w.length > 0).length : 0), 0)}</span>
             <span>Chars: {content.length}</span>
           </div>
           <div className="flex items-center gap-4">
@@ -402,7 +626,7 @@ export default function Editor() {
                     <button 
                       onClick={() => {
                         navigator.clipboard.writeText(`${window.location.origin}/editor/${story._id}`);
-                        alert('Link copied!');
+                        showToast('Link copied!', 'success');
                       }}
                       className="p-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
                     >
@@ -411,6 +635,80 @@ export default function Editor() {
                   </div>
                 </div>
               )}
+
+              <div className="pt-6 border-t border-border-dark">
+                <h4 className="font-bold text-sm mb-4 flex items-center gap-2"><Users size={16} /> Collaborators</h4>
+                <div className="flex items-center gap-2 mb-4">
+                  <input 
+                    type="email" 
+                    placeholder="Collaborator email..." 
+                    value={collabEmail}
+                    onChange={(e) => setCollabEmail(e.target.value)}
+                    className="flex-1 bg-bg-dark border border-border-dark rounded-lg p-2 text-sm text-slate-300 outline-none focus:border-primary"
+                  />
+                  <button 
+                    onClick={handleAddCollaborator}
+                    className="p-2 bg-primary text-white rounded-lg hover:bg-primary-hover transition-colors"
+                  >
+                    <Plus size={18} />
+                  </button>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 text-xs text-slate-400">
+                    <div className="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary font-bold">A</div>
+                    <span>{story?.authorName || 'Author'} (Owner)</span>
+                  </div>
+                  {story?.collaborators?.map((c: string, i: number) => (
+                    <div key={i} className="flex items-center gap-2 text-xs text-slate-400">
+                      <div className="w-6 h-6 rounded-full bg-slate-700 flex items-center justify-center text-slate-300 font-bold">C</div>
+                      <span>Collaborator {i + 1}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-8 right-8 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-300 ${toast.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+            {toast.type === 'success' ? <CheckCircle size={14} /> : <X size={14} />}
+          </div>
+          <span className="font-bold text-sm">{toast.message}</span>
+        </div>
+      )}
+
+      {/* Delete Chapter Modal */}
+      {chapterToDelete && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-surface-dark border border-border-dark rounded-2xl w-full max-w-sm overflow-hidden p-6">
+            <h3 className="font-bold text-lg mb-2">Delete Chapter?</h3>
+            <p className="text-sm text-slate-400 mb-6">This action cannot be undone. Are you sure you want to delete this chapter?</p>
+            <div className="flex justify-end gap-3">
+              <button 
+                onClick={() => setChapterToDelete(null)}
+                className="px-4 py-2 rounded-lg text-sm font-bold text-slate-300 hover:bg-surface-dark transition-colors"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  const updatedChapters = chapters.filter(c => c.id !== chapterToDelete);
+                  setChapters(updatedChapters);
+                  if (activeChapterId === chapterToDelete) {
+                    switchChapter(updatedChapters[0].id);
+                  }
+                  scheduleSave(title, updatedChapters);
+                  setChapterToDelete(null);
+                  showToast('Chapter deleted', 'success');
+                }}
+                className="px-4 py-2 rounded-lg text-sm font-bold bg-red-500 text-white hover:bg-red-600 transition-colors"
+              >
+                Delete
+              </button>
             </div>
           </div>
         </div>

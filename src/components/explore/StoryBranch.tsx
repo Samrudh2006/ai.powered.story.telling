@@ -1,8 +1,246 @@
-import React, { useState } from 'react';
-import { Search, Plus, Users, LayoutGrid, List, Sparkles, GitBranch, Settings, Map, ZoomIn, ZoomOut, Maximize, ChevronRight } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Search, Plus, Users, LayoutGrid, List, Sparkles, GitBranch, Settings, Map, ZoomIn, ZoomOut, Maximize, ChevronRight, X, Trash2 } from 'lucide-react';
+import { db, auth } from '../../firebase';
+import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, arrayUnion } from 'firebase/firestore';
+import { motion } from 'motion/react';
+import { GoogleGenAI } from '@google/genai';
+
+interface Story {
+  id: string;
+  title: string;
+  authorId: string;
+  collaborators?: string[];
+}
+
+interface StoryNode {
+  id: string;
+  title: string;
+  content: string;
+  x: number;
+  y: number;
+  type: string;
+  parentId?: string;
+  authorId: string;
+  authorName: string;
+  createdAt: number;
+}
 
 export default function StoryBranch() {
+  const [stories, setStories] = useState<Story[]>([]);
+  const [activeStoryId, setActiveStoryId] = useState<string | null>(null);
+  const [nodes, setNodes] = useState<StoryNode[]>([]);
   const [showMergeModal, setShowMergeModal] = useState(false);
+  const [showCollabModal, setShowCollabModal] = useState(false);
+  const [collabEmail, setCollabEmail] = useState('');
+  const [newNodeTitle, setNewNodeTitle] = useState('');
+  const [isAddingNode, setIsAddingNode] = useState(false);
+  const [editingNode, setEditingNode] = useState<StoryNode | null>(null);
+  const [editNodeTitle, setEditNodeTitle] = useState('');
+  const [editNodeContent, setEditNodeContent] = useState('');
+  const [activeTimeline, setActiveTimeline] = useState('main');
+  const [isGeneratingAI, setIsGeneratingAI] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
+
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  useEffect(() => {
+    if (!auth.currentUser) return;
+    
+    // Listen to stories where user is author OR collaborator
+    const q = query(collection(db, 'stories'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedStories: Story[] = [];
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.authorId === auth.currentUser?.uid || (data.collaborators && data.collaborators.includes(auth.currentUser?.uid))) {
+          loadedStories.push({ id: doc.id, ...data } as Story);
+        }
+      });
+      setStories(loadedStories);
+      if (loadedStories.length > 0 && !activeStoryId) {
+        setActiveStoryId(loadedStories[0].id);
+      }
+    });
+
+    return () => unsubscribe();
+  }, [activeStoryId]);
+
+  useEffect(() => {
+    if (!activeStoryId || !auth.currentUser) return;
+
+    const q = query(collection(db, 'stories', activeStoryId, 'nodes'));
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const loadedNodes: StoryNode[] = [];
+      snapshot.forEach((doc) => {
+        loadedNodes.push({ id: doc.id, ...doc.data() } as StoryNode);
+      });
+      setNodes(loadedNodes);
+    });
+
+    return () => unsubscribe();
+  }, [activeStoryId]);
+
+  const activeStory = stories.find(s => s.id === activeStoryId);
+
+  const [selectedParentId, setSelectedParentId] = useState<string | undefined>(undefined);
+
+  const handleAddNode = async () => {
+    if (!activeStoryId || !newNodeTitle.trim() || !auth.currentUser) return;
+    
+    try {
+      const parentNode = nodes.find(n => n.id === selectedParentId);
+      const startX = parentNode ? parentNode.x + 250 : 100;
+      const startY = parentNode ? parentNode.y : 100;
+
+      await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), {
+        title: newNodeTitle,
+        content: '',
+        x: startX + (Math.random() * 50 - 25),
+        y: startY + (Math.random() * 100 - 50),
+        type: activeTimeline === 'main' ? 'branch' : activeTimeline,
+        parentId: selectedParentId || null,
+        authorId: auth.currentUser.uid,
+        authorName: auth.currentUser.displayName || 'Anonymous',
+        createdAt: Date.now()
+      });
+      setNewNodeTitle('');
+      setIsAddingNode(false);
+      setSelectedParentId(undefined);
+    } catch (error) {
+      console.error("Error adding node:", error);
+    }
+  };
+
+  const handleGenerateAISuggestion = async () => {
+    if (!activeStoryId || !auth.currentUser) return;
+    
+    // Get context from existing nodes
+    const contextNodes = nodes.slice(-5).map(n => `${n.title}: ${n.content}`).join('\n');
+    
+    setIsGeneratingAI(true);
+    try {
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const response = await ai.models.generateContent({
+        model: 'gemini-3-flash-preview',
+        contents: `Based on this story context, suggest a new interesting plot branch or twist. Return ONLY a JSON object with 'title' (max 50 chars) and 'content' (max 300 chars).\n\nContext:\n${contextNodes}`,
+        config: {
+          responseMimeType: "application/json",
+        }
+      });
+      
+      const result = JSON.parse(response.text || '{}');
+      
+      if (result.title && result.content) {
+        const parentNode = nodes.length > 0 ? nodes[nodes.length - 1] : null;
+        const startX = parentNode ? parentNode.x + 250 : 100;
+        const startY = parentNode ? parentNode.y + 150 : 100;
+
+        await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), {
+          title: result.title,
+          content: result.content,
+          x: startX + (Math.random() * 50 - 25),
+          y: startY + (Math.random() * 100 - 50),
+          type: 'ai',
+          parentId: parentNode ? parentNode.id : null,
+          authorId: auth.currentUser.uid,
+          authorName: 'AI Assistant',
+          createdAt: Date.now()
+        });
+        showToast('AI suggestion added!', 'success');
+        setActiveTimeline('ai');
+      } else {
+        throw new Error("Invalid AI response format");
+      }
+    } catch (error: any) {
+      console.error("Error generating AI suggestion:", error);
+      if (error.message?.includes('API key not valid')) {
+        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
+      } else {
+        showToast('Failed to generate AI suggestion.', 'error');
+      }
+    }
+    setIsGeneratingAI(false);
+  };
+
+  const handleDeleteNode = async (nodeId: string) => {
+    if (!activeStoryId) return;
+    try {
+      await deleteDoc(doc(db, 'stories', activeStoryId, 'nodes', nodeId));
+    } catch (error) {
+      console.error("Error deleting node:", error);
+    }
+  };
+
+  const handleDragEnd = async (nodeId: string, info: any) => {
+    if (!activeStoryId) return;
+    const node = nodes.find(n => n.id === nodeId);
+    if (!node) return;
+
+    try {
+      await updateDoc(doc(db, 'stories', activeStoryId, 'nodes', nodeId), {
+        x: node.x + info.offset.x,
+        y: node.y + info.offset.y
+      });
+    } catch (error) {
+      console.error("Error updating node position:", error);
+    }
+  };
+
+  const handleSaveNodeEdit = async () => {
+    if (!activeStoryId || !editingNode) return;
+    try {
+      await updateDoc(doc(db, 'stories', activeStoryId, 'nodes', editingNode.id), {
+        title: editNodeTitle,
+        content: editNodeContent
+      });
+      setEditingNode(null);
+      showToast('Node updated successfully', 'success');
+    } catch (error) {
+      console.error("Error updating node:", error);
+      showToast('Failed to update node', 'error');
+    }
+  };
+
+  const handleAddCollaborator = async () => {
+    if (!activeStoryId || !collabEmail.trim()) return;
+    
+    try {
+      const usersRef = collection(db, 'users');
+      const q = query(usersRef, where('email', '==', collabEmail.trim().toLowerCase()));
+      const querySnapshot = await getDocs(q);
+      
+      if (!querySnapshot.empty) {
+        const userDoc = querySnapshot.docs[0];
+        const userId = userDoc.id;
+        
+        await updateDoc(doc(db, 'stories', activeStoryId), {
+          collaborators: arrayUnion(userId)
+        });
+        setCollabEmail('');
+        setShowCollabModal(false);
+        showToast('Collaborator added successfully!', 'success');
+      } else {
+        showToast('User not found with that email.', 'error');
+      }
+    } catch (error) {
+      console.error("Error adding collaborator:", error);
+      showToast('Failed to add collaborator.', 'error');
+    }
+  };
+
+  const filteredNodes = nodes.filter(node => {
+    const isMain = node.type === 'branch' || node.type === 'main' || !node.type;
+    if (activeTimeline === 'main') return isMain;
+    if (activeTimeline === 'ai') return isMain || node.type === 'ai';
+    if (activeTimeline === 'draft') return isMain || node.type === 'draft';
+    if (activeTimeline === 'alternate') return isMain || node.type === 'alternate';
+    return true;
+  });
 
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0B10] text-gray-300 font-sans">
@@ -10,30 +248,53 @@ export default function StoryBranch() {
       <div className="w-64 border-r border-white/5 bg-[#0F111A] flex flex-col shrink-0">
         <div className="p-5">
           <div className="text-xs font-semibold text-gray-500 tracking-wider mb-2">ACTIVE PROJECT</div>
-          <div className="text-lg font-bold text-white">Project Alpha: Awakening</div>
+          <select 
+            className="w-full bg-[#1A1C23] border border-white/10 rounded-lg p-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+            value={activeStoryId || ''}
+            onChange={(e) => setActiveStoryId(e.target.value)}
+          >
+            {stories.map(story => (
+              <option key={story.id} value={story.id}>{story.title}</option>
+            ))}
+            {stories.length === 0 && <option value="">No projects found</option>}
+          </select>
         </div>
 
         <div className="px-3 py-2">
           <div className="text-xs font-semibold text-gray-500 tracking-wider mb-3 px-2">TIMELINES</div>
           <div className="space-y-1">
-            <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg bg-indigo-500/10 text-indigo-400 font-medium">
+            <button 
+              onClick={() => setActiveTimeline('main')}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${activeTimeline === 'main' ? 'bg-indigo-500/10 text-indigo-400' : 'hover:bg-white/5 text-gray-400'}`}
+            >
               <Sparkles size={16} />
               Main Narrative
             </button>
-            <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 text-gray-400 transition-colors">
+            <button 
+              onClick={() => setActiveTimeline('draft')}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${activeTimeline === 'draft' ? 'bg-indigo-500/10 text-indigo-400' : 'hover:bg-white/5 text-gray-400'}`}
+            >
               <List size={16} />
               Drafts & Ideas
             </button>
-            <button className="w-full flex items-center gap-3 px-3 py-2 rounded-lg hover:bg-white/5 text-gray-400 transition-colors">
+            <button 
+              onClick={() => setActiveTimeline('alternate')}
+              className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg font-medium transition-colors ${activeTimeline === 'alternate' ? 'bg-indigo-500/10 text-indigo-400' : 'hover:bg-white/5 text-gray-400'}`}
+            >
               <GitBranch size={16} />
               Alternate Realities
             </button>
-            <button className="w-full flex items-center justify-between px-3 py-2 rounded-lg hover:bg-white/5 text-gray-400 transition-colors">
+            <button 
+              onClick={() => setActiveTimeline('ai')}
+              className={`w-full flex items-center justify-between px-3 py-2 rounded-lg font-medium transition-colors ${activeTimeline === 'ai' ? 'bg-indigo-500/10 text-indigo-400' : 'hover:bg-white/5 text-gray-400'}`}
+            >
               <div className="flex items-center gap-3">
                 <Settings size={16} />
                 AI Suggestions
               </div>
-              <span className="bg-indigo-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">12</span>
+              <span className="bg-indigo-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {nodes.filter(n => n.type === 'ai').length}
+              </span>
             </button>
           </div>
         </div>
@@ -49,9 +310,12 @@ export default function StoryBranch() {
         </div>
 
         <div className="mt-auto p-4">
-          <button className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors text-sm font-medium text-white">
+          <button 
+            onClick={() => setShowCollabModal(true)}
+            className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-white/10 hover:bg-white/5 transition-colors text-sm font-medium text-white"
+          >
             <Users size={16} />
-            Collaborators
+            Collaborators ({activeStory?.collaborators?.length || 0})
           </button>
         </div>
       </div>
@@ -63,7 +327,23 @@ export default function StoryBranch() {
           <div className="flex items-center gap-2 text-sm">
             <span className="text-gray-400">Projects</span>
             <ChevronRight size={14} className="text-gray-600" />
-            <span className="text-white font-medium">The Hero's Path</span>
+            <span className="text-white font-medium">{activeStory?.title || 'Select a project'}</span>
+            {activeStory && (
+              <>
+                <span className="text-gray-600 mx-2">|</span>
+                <span className={`text-xs font-bold uppercase tracking-wider ${
+                  activeTimeline === 'main' ? 'text-indigo-400' :
+                  activeTimeline === 'draft' ? 'text-gray-400' :
+                  activeTimeline === 'alternate' ? 'text-emerald-400' :
+                  'text-purple-400'
+                }`}>
+                  {activeTimeline === 'main' ? 'Main Narrative' : 
+                   activeTimeline === 'draft' ? 'Drafts & Ideas' : 
+                   activeTimeline === 'alternate' ? 'Alternate Realities' : 
+                   'AI Suggestions'} View
+                </span>
+              </>
+            )}
           </div>
           
           <div className="flex items-center gap-4">
@@ -75,8 +355,18 @@ export default function StoryBranch() {
                 className="w-64 bg-[#1A1C23] border border-white/10 rounded-lg pl-9 pr-4 py-1.5 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 transition-colors"
               />
             </div>
+            {activeTimeline === 'ai' && (
+              <button 
+                onClick={handleGenerateAISuggestion}
+                disabled={isGeneratingAI}
+                className="flex items-center gap-2 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
+              >
+                <Sparkles size={16} />
+                {isGeneratingAI ? 'Generating...' : 'Generate AI Branch'}
+              </button>
+            )}
             <button 
-              onClick={() => setShowMergeModal(true)}
+              onClick={() => setIsAddingNode(true)}
               className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-1.5 rounded-lg text-sm font-medium transition-colors"
             >
               <Plus size={16} />
@@ -87,104 +377,205 @@ export default function StoryBranch() {
         </div>
 
         {/* Canvas */}
-        <div className="flex-1 relative bg-[#0A0B10]" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0)', backgroundSize: '24px 24px' }}>
+        <div className="flex-1 relative bg-[#0A0B10] overflow-auto" ref={canvasRef} style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.05) 1px, transparent 0)', backgroundSize: '24px 24px' }}>
           
           {/* Legend */}
-          <div className="absolute top-6 left-6 flex items-center gap-4 bg-[#1A1C23] border border-white/10 rounded-full px-4 py-1.5 text-xs font-medium">
+          <div className="fixed top-24 left-72 flex items-center gap-4 bg-[#1A1C23] border border-white/10 rounded-full px-4 py-1.5 text-xs font-medium z-20">
             <div className="flex items-center gap-2">
               <div className="w-2 h-2 rounded-full bg-indigo-500"></div>
-              <span className="text-gray-300">MAIN PLOT</span>
+              <span className="text-gray-300">MAIN</span>
             </div>
             <div className="w-px h-3 bg-white/10"></div>
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full border border-indigo-500"></div>
-              <span className="text-gray-400">AI BRANCH</span>
+              <div className="w-2 h-2 rounded-full bg-gray-500"></div>
+              <span className="text-gray-400">DRAFT</span>
+            </div>
+            <div className="w-px h-3 bg-white/10"></div>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full bg-emerald-500"></div>
+              <span className="text-gray-400">ALT</span>
+            </div>
+            <div className="w-px h-3 bg-white/10"></div>
+            <div className="flex items-center gap-2">
+              <div className="w-2 h-2 rounded-full border border-purple-500 border-dashed"></div>
+              <span className="text-gray-400">AI</span>
             </div>
           </div>
 
-          {/* Nodes (Static representation for visual match) */}
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px]">
-            {/* Connection Lines */}
+          {/* Nodes */}
+          <div className="absolute inset-0 min-w-[2000px] min-h-[2000px]">
+            {/* Draw lines between nodes if parentId exists */}
             <svg className="absolute inset-0 w-full h-full pointer-events-none" style={{ zIndex: 0 }}>
-              <path d="M 150 200 L 300 200" stroke="#4F46E5" strokeWidth="2" fill="none" />
-              <path d="M 450 200 L 600 200" stroke="#4F46E5" strokeWidth="2" fill="none" />
-              <path d="M 750 200 L 900 200" stroke="#4F46E5" strokeWidth="2" fill="none" />
-              
-              {/* Branch up */}
-              <path d="M 375 200 C 375 100, 450 100, 550 100" stroke="#4F46E5" strokeWidth="2" strokeDasharray="4 4" fill="none" opacity="0.5" />
-              
-              {/* Branch down */}
-              <path d="M 675 200 C 675 300, 750 300, 850 300" stroke="#4F46E5" strokeWidth="2" strokeDasharray="4 4" fill="none" opacity="0.5" />
+              {filteredNodes.map(node => {
+                if (node.parentId) {
+                  const parent = filteredNodes.find(n => n.id === node.parentId);
+                  if (parent) {
+                    return (
+                      <path 
+                        key={`line-${node.id}`}
+                        d={`M ${parent.x + 96} ${parent.y + 50} C ${parent.x + 150} ${parent.y + 50}, ${node.x - 50} ${node.y + 50}, ${node.x} ${node.y + 50}`} 
+                        stroke="#4F46E5" 
+                        strokeWidth="2" 
+                        fill="none" 
+                        opacity="0.5"
+                      />
+                    );
+                  }
+                }
+                return null;
+              })}
             </svg>
 
-            {/* Chapter 1 */}
-            <div className="absolute left-0 top-[160px] w-48 bg-[#12131A] border border-indigo-500 rounded-xl p-4 shadow-lg z-10">
-              <div className="text-[10px] font-bold text-indigo-500 tracking-wider mb-1 uppercase">Chapter 1</div>
-              <div className="text-sm font-bold text-white mb-3">Cold Opening</div>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Users size={12} />
-                User: Alex
-              </div>
-            </div>
-
-            {/* Branch Point */}
-            <div className="absolute left-[300px] top-[160px] w-48 bg-[#12131A] border border-indigo-500 rounded-xl p-4 shadow-lg z-10">
-              <div className="text-[10px] font-bold text-indigo-500 tracking-wider mb-1 uppercase">Branch Point</div>
-              <div className="text-sm font-bold text-white mb-3">The Mysterious Stranger</div>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Users size={12} />
-                User: Alex
-              </div>
-            </div>
-
-            {/* Chapter 2 */}
-            <div className="absolute left-[600px] top-[160px] w-48 bg-[#12131A] border border-indigo-500 rounded-xl p-4 shadow-lg z-10">
-              <div className="text-[10px] font-bold text-indigo-500 tracking-wider mb-1 uppercase">Chapter 2</div>
-              <div className="text-sm font-bold text-white mb-3">Journey to the East</div>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Users size={12} />
-                User: Sarah
-              </div>
-            </div>
-
-            {/* AI Suggestion Up */}
-            <div className="absolute left-[550px] top-[60px] w-48 bg-[#12131A] border border-indigo-500/30 border-dashed rounded-xl p-4 shadow-lg z-10">
-              <div className="text-[10px] font-bold text-indigo-400 tracking-wider mb-1 uppercase">AI Suggestion</div>
-              <div className="text-sm font-bold text-white mb-3">The Secret Pact</div>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Sparkles size={12} />
-                GPT-4o
-              </div>
-            </div>
-
-            {/* AI Suggestion Down */}
-            <div className="absolute left-[850px] top-[260px] w-48 bg-[#12131A] border border-indigo-500/30 border-dashed rounded-xl p-4 shadow-lg z-10">
-              <div className="text-[10px] font-bold text-indigo-400 tracking-wider mb-1 uppercase">AI Suggestion</div>
-              <div className="text-sm font-bold text-white mb-3">Ambush at Night</div>
-              <div className="flex items-center gap-2 text-xs text-gray-500">
-                <Sparkles size={12} />
-                GPT-4o
-              </div>
-            </div>
+            {filteredNodes.map(node => (
+              <motion.div
+                key={node.id}
+                drag
+                dragMomentum={false}
+                onDragEnd={(e, info) => handleDragEnd(node.id, info)}
+                initial={{ x: node.x, y: node.y }}
+                animate={{ x: node.x, y: node.y }}
+                onClick={() => {
+                  setEditingNode(node);
+                  setEditNodeTitle(node.title);
+                  setEditNodeContent(node.content || '');
+                }}
+                className={`absolute w-48 bg-[#12131A] border ${
+                  node.type === 'ai' ? 'border-purple-500/50 border-dashed' : 
+                  node.type === 'draft' ? 'border-gray-500/50' :
+                  node.type === 'alternate' ? 'border-emerald-500/50' :
+                  'border-indigo-500'
+                } rounded-xl p-4 shadow-lg z-10 cursor-move group hover:ring-2 hover:ring-indigo-500/50 transition-shadow`}
+              >
+                <div className="flex justify-between items-start mb-1">
+                  <div className={`text-[10px] font-bold ${
+                    node.type === 'ai' ? 'text-purple-400' : 
+                    node.type === 'draft' ? 'text-gray-400' :
+                    node.type === 'alternate' ? 'text-emerald-400' :
+                    'text-indigo-500'
+                  } tracking-wider uppercase`}>
+                    {node.type === 'ai' ? 'AI Suggestion' : 
+                     node.type === 'draft' ? 'Draft' :
+                     node.type === 'alternate' ? 'Alternate' :
+                     'Branch'}
+                  </div>
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); handleDeleteNode(node.id); }}
+                    className="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 transition-opacity"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+                <div className="text-sm font-bold text-white mb-3">{node.title}</div>
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  {node.type === 'ai' ? <Sparkles size={12} /> : <Users size={12} />}
+                  {node.authorName}
+                </div>
+              </motion.div>
+            ))}
           </div>
 
-          {/* Minimap */}
-          <div className="absolute bottom-6 left-6 w-48 h-32 bg-[#12131A] border border-white/10 rounded-xl overflow-hidden opacity-80 hover:opacity-100 transition-opacity">
-            <div className="w-full h-full relative p-2">
-              <div className="absolute inset-0" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.1) 1px, transparent 0)', backgroundSize: '8px 8px' }}></div>
-              {/* Minimap representation */}
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-32 h-16 border border-indigo-500/50 rounded flex items-center justify-center">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
-                  <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"></div>
+          {/* Add Node Modal */}
+          {isAddingNode && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-8">
+              <div className="bg-[#12131A] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+                <h2 className="text-xl font-bold text-white mb-4">Create New Branch</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Branch Title</label>
+                    <input 
+                      type="text" 
+                      placeholder="e.g., The Secret Alliance" 
+                      value={newNodeTitle}
+                      onChange={(e) => setNewNodeTitle(e.target.value)}
+                      className="w-full bg-[#1A1C23] border border-white/10 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Connect to Parent (Optional)</label>
+                    <select 
+                      value={selectedParentId || ''}
+                      onChange={(e) => setSelectedParentId(e.target.value || undefined)}
+                      className="w-full bg-[#1A1C23] border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500"
+                    >
+                      <option value="">No Parent (Root Node)</option>
+                      {filteredNodes.map(node => (
+                        <option key={node.id} value={node.id}>{node.title}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-6">
+                  <button onClick={() => { setIsAddingNode(false); setSelectedParentId(undefined); }} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors">Cancel</button>
+                  <button onClick={handleAddNode} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors">Create Branch</button>
                 </div>
               </div>
             </div>
-          </div>
+          )}
+
+          {/* Edit Node Modal */}
+          {editingNode && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-8">
+              <div className="bg-[#12131A] border border-white/10 rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-white">Edit Branch</h2>
+                  <button onClick={() => setEditingNode(null)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+                </div>
+                <div className="space-y-4 flex-1 overflow-y-auto pr-2">
+                  <div>
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Branch Title</label>
+                    <input 
+                      type="text" 
+                      value={editNodeTitle}
+                      onChange={(e) => setEditNodeTitle(e.target.value)}
+                      className="w-full bg-[#1A1C23] border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                  <div className="flex-1 flex flex-col min-h-[300px]">
+                    <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Content</label>
+                    <textarea 
+                      value={editNodeContent}
+                      onChange={(e) => setEditNodeContent(e.target.value)}
+                      className="w-full flex-1 bg-[#1A1C23] border border-white/10 rounded-lg p-4 text-white focus:outline-none focus:border-indigo-500 resize-none font-serif"
+                      placeholder="Write the content for this branch..."
+                    />
+                  </div>
+                </div>
+                <div className="flex justify-end gap-3 mt-6 pt-4 border-t border-white/10">
+                  <button onClick={() => setEditingNode(null)} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors">Cancel</button>
+                  <button onClick={handleSaveNodeEdit} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors">Save Changes</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Collaborator Modal */}
+          {showCollabModal && (
+            <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-8">
+              <div className="bg-[#12131A] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl">
+                <div className="flex justify-between items-center mb-4">
+                  <h2 className="text-xl font-bold text-white">Add Collaborator</h2>
+                  <button onClick={() => setShowCollabModal(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+                </div>
+                <p className="text-sm text-gray-400 mb-4">Enter the email address of the user you want to invite to this project.</p>
+                <input 
+                  type="email" 
+                  placeholder="User Email" 
+                  value={collabEmail}
+                  onChange={(e) => setCollabEmail(e.target.value)}
+                  className="w-full bg-[#1A1C23] border border-white/10 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-indigo-500 mb-4"
+                  autoFocus
+                />
+                <div className="flex justify-end gap-3">
+                  <button onClick={() => setShowCollabModal(false)} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors">Cancel</button>
+                  <button onClick={handleAddCollaborator} className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors">Invite</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Zoom Controls */}
-          <div className="absolute bottom-6 right-6 flex flex-col gap-2">
+          <div className="fixed bottom-6 right-6 flex flex-col gap-2 z-20">
             <div className="bg-[#1A1C23] border border-white/10 rounded-lg overflow-hidden flex flex-col">
               <button className="p-2.5 text-gray-400 hover:text-white hover:bg-white/5 transition-colors border-b border-white/10">
                 <ZoomIn size={18} />
@@ -203,143 +594,13 @@ export default function StoryBranch() {
         </div>
       </div>
 
-      {/* Merge Modal Overlay */}
-      {showMergeModal && (
-        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-8">
-          <div className="bg-[#12131A] border border-white/10 rounded-2xl w-full max-w-6xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
-            {/* Modal Header */}
-            <div className="p-6 border-b border-white/10 flex items-start justify-between">
-              <div className="flex items-start gap-4">
-                <div className="p-2 bg-indigo-500/10 rounded-lg text-indigo-400 mt-1">
-                  <GitBranch size={20} />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-white mb-1">Merge Branch</h2>
-                  <div className="text-sm text-gray-400">
-                    Comparing <span className="text-indigo-400 font-mono text-xs bg-indigo-500/10 px-1.5 py-0.5 rounded">feature/ai-plot-twist</span> into <span className="text-gray-300 font-mono text-xs bg-white/5 px-1.5 py-0.5 rounded">main</span>
-                  </div>
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/20 text-yellow-500 px-3 py-1.5 rounded-lg text-sm font-medium">
-                  <span className="w-2 h-2 rounded-full bg-yellow-500"></span>
-                  1 Conflict Found
-                </div>
-                <button onClick={() => setShowMergeModal(false)} className="p-2 text-gray-400 hover:text-white hover:bg-white/5 rounded-lg transition-colors">
-                  <Plus size={20} className="rotate-45" />
-                </button>
-              </div>
-            </div>
-
-            {/* AI Summary */}
-            <div className="px-6 py-4 border-b border-white/10 bg-[#1A1C23]/50 flex items-center gap-4">
-              <div className="text-[10px] font-bold text-indigo-400 tracking-wider uppercase border border-indigo-500/30 px-2 py-1 rounded">AI Summary</div>
-              <div className="text-sm text-gray-300 italic">"This branch introduces a pivotal dialogue between Elara and the Keeper, revealing the origins of the Chronos Shard."</div>
-            </div>
-
-            {/* Diff View */}
-            <div className="flex-1 overflow-y-auto p-6 flex gap-6">
-              {/* Left Column - Current */}
-              <div className="flex-1 space-y-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-xs font-bold text-gray-500 tracking-wider uppercase">Current Main Plot</div>
-                  <div className="text-xs text-gray-500 font-mono">v1.2.4</div>
-                </div>
-                
-                <div className="text-sm text-gray-300 leading-relaxed space-y-4">
-                  <p>Elara stood before the heavy iron gates of the Citadel. The wind howled through the canyon, carrying the scent of rain and ozone. She tightened her grip on the hilt of her sword, feeling the cold steel through her leather gloves.</p>
-                  
-                  <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 relative">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-red-500 rounded-l-lg"></div>
-                    <div className="text-[10px] font-bold text-red-400 tracking-wider uppercase mb-2">- Removed</div>
-                    <p className="text-red-200">She waited for a sign from the scouts, but only the silence of the valley answered her. Her heart hammered against her ribs like a trapped bird.</p>
-                  </div>
-
-                  <p>The gates groaned as they began to swing inward, revealing a courtyard shrouded in mist. A single figure stood at the center, silhouetted against the pale moonlight.</p>
-
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 relative">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500 rounded-l-lg"></div>
-                    <div className="text-[10px] font-bold text-yellow-500 tracking-wider uppercase mb-2">! Conflicting Area</div>
-                    <p className="text-yellow-200">"I've been expecting you, Elara," the figure said, its voice echoing with a strange, metallic resonance. "The Shard is not for mortals to command."</p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Right Column - Incoming */}
-              <div className="flex-1 space-y-4">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-xs font-bold text-indigo-400 tracking-wider uppercase">Selected Branch (AI Twist)</div>
-                  <div className="text-xs text-indigo-400/70 font-mono">Incoming</div>
-                </div>
-
-                <div className="text-sm text-gray-300 leading-relaxed space-y-4">
-                  <p>Elara stood before the heavy iron gates of the Citadel. The wind howled through the canyon, carrying the scent of rain and ozone. She tightened her grip on the hilt of her sword, feeling the cold steel through her leather gloves.</p>
-                  
-                  <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 relative">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-green-500 rounded-l-lg"></div>
-                    <div className="text-[10px] font-bold text-green-400 tracking-wider uppercase mb-2">+ Added</div>
-                    <p className="text-green-200">She didn't need a sign from the scouts; she could feel the resonance of the Chronos Shard pulsing from deep within the stone walls. It hummed in her marrow, a song of lost time.</p>
-                  </div>
-
-                  <p>The gates groaned as they began to swing inward, revealing a courtyard shrouded in mist. A single figure stood at the center, silhouetted against the pale moonlight.</p>
-
-                  <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 relative">
-                    <div className="absolute top-0 left-0 w-1 h-full bg-yellow-500 rounded-l-lg"></div>
-                    <div className="text-[10px] font-bold text-yellow-500 tracking-wider uppercase mb-2">! Conflicting Area</div>
-                    <p className="text-yellow-200">"You are late," the Keeper hissed, stepping from the shadows. "The timeline is already fraying at the edges, and your presence only accelerates the decay."</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Resolution Area */}
-            <div className="p-6 border-t border-white/10 bg-[#1A1C23]">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <div className="w-2 h-2 rounded-full bg-yellow-500"></div>
-                  <span className="text-sm font-bold text-white">Resolve Conflict: Paragraph 4</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button className="px-3 py-1.5 rounded border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors">Keep Current</button>
-                  <button className="px-3 py-1.5 rounded border border-indigo-500/50 bg-indigo-500/10 text-sm font-medium text-indigo-400 hover:bg-indigo-500/20 transition-colors">Use Branch</button>
-                  <button className="px-3 py-1.5 rounded border border-white/10 text-sm font-medium text-gray-300 hover:bg-white/5 transition-colors">Manual Edit</button>
-                </div>
-              </div>
-              
-              <div className="bg-[#0A0B10] border border-white/10 rounded-lg p-4 text-sm text-gray-300 relative">
-                <p>"I've been expecting you, Elara," the Keeper hissed, stepping from the shadows. "The timeline is already fraying at the edges, and your presence only accelerates the decay of the Shard."</p>
-                <div className="absolute bottom-2 right-4 text-[10px] text-gray-500">
-                  AI Suggestion: <span className="text-indigo-400 cursor-pointer hover:underline">Merge both dialogues</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Modal Footer */}
-            <div className="p-4 border-t border-white/10 flex items-center justify-between bg-[#12131A]">
-              <div className="flex items-center gap-4 text-xs font-medium">
-                <div className="flex items-center gap-1.5 text-green-400">
-                  <div className="w-2 h-2 border border-green-500 rounded-sm"></div>
-                  1 Addition
-                </div>
-                <div className="flex items-center gap-1.5 text-red-400">
-                  <div className="w-2 h-2 border border-red-500 rounded-sm"></div>
-                  1 Removal
-                </div>
-                <div className="flex items-center gap-1.5 text-yellow-500">
-                  <div className="w-2 h-2 border border-yellow-500 rounded-sm"></div>
-                  1 Conflict
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <button onClick={() => setShowMergeModal(false)} className="px-4 py-2 rounded-lg text-sm font-medium text-gray-400 hover:text-white transition-colors">Cancel</button>
-                <button className="px-4 py-2 rounded-lg border border-white/10 text-sm font-medium text-white hover:bg-white/5 transition-colors">Preview Merge</button>
-                <button className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium transition-colors flex items-center gap-2">
-                  <div className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin hidden"></div>
-                  Confirm Merge
-                </button>
-              </div>
-            </div>
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-8 right-8 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-300 ${toast.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+            {toast.type === 'success' ? <span className="text-sm">✓</span> : <span className="text-sm">✕</span>}
           </div>
+          <span className="font-bold text-sm">{toast.message}</span>
         </div>
       )}
     </div>

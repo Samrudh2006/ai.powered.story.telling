@@ -1,248 +1,220 @@
 import React, { useState } from 'react';
-import { RefreshCw, LayoutGrid, List, ChevronDown, Check, Image as ImageIcon } from 'lucide-react';
+import { Grid, List, Sparkles } from 'lucide-react';
+import { GoogleGenAI } from '@google/genai';
 
 export default function PortraitStudio() {
+  const [prompt, setPrompt] = useState('');
+  const [style, setStyle] = useState('Oil Painting');
+  const [mood, setMood] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
-  const [style, setStyle] = useState('oil');
-  const [mood, setMood] = useState('melancholic');
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [results, setResults] = useState<string[]>([
+    'https://picsum.photos/seed/portrait1/400/500',
+    'https://picsum.photos/seed/portrait2/400/500',
+    'https://picsum.photos/seed/portrait3/400/500',
+    'https://picsum.photos/seed/portrait4/400/500',
+  ]);
 
-  const handleGenerate = () => {
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const handleGenerate = async () => {
+    if (!prompt.trim()) return;
     setIsGenerating(true);
-    setTimeout(() => setIsGenerating(false), 2000);
+    try {
+      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+      const fullPrompt = `${prompt}, style: ${style}, mood: ${mood}`;
+      
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash-image',
+        contents: {
+          parts: [
+            { text: fullPrompt }
+          ]
+        }
+      });
+      
+      const newResults: string[] = [];
+      for (const part of response.candidates?.[0]?.content?.parts || []) {
+        if (part.inlineData) {
+          const base64EncodeString = part.inlineData.data;
+          const imageUrl = `data:image/png;base64,${base64EncodeString}`;
+          newResults.push(imageUrl);
+        }
+      }
+      
+      if (newResults.length > 0) {
+        // Pad with placeholders if less than 4
+        while (newResults.length < 4) {
+          newResults.push(`https://picsum.photos/seed/${Math.random()}/400/500`);
+        }
+        setResults(newResults.slice(0, 4));
+      }
+    } catch (e: any) {
+      console.error("Error generating image:", e);
+      if (e.message?.includes('API key not valid')) {
+        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
+      } else {
+        showToast("Failed to generate portrait. Please try again.", 'error');
+      }
+    }
+    setIsGenerating(false);
   };
 
   return (
     <div className="flex-1 flex overflow-hidden bg-[#0A0B10] text-gray-300 font-sans">
-      {/* Sidebar Controls */}
+      {/* Left Sidebar - Controls */}
       <div className="w-80 border-r border-white/5 bg-[#0F111A] flex flex-col shrink-0 overflow-y-auto">
-        
-        {/* Physical Traits */}
-        <div className="p-6 border-b border-white/5">
-          <div className="text-[10px] font-bold text-indigo-400 tracking-wider mb-3 uppercase">Physical Traits</div>
-          <textarea 
-            rows={4}
-            className="w-full bg-[#1A1C23] border border-white/10 rounded-xl p-4 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors resize-none"
-            placeholder="Describe features, hair, eyes, scars, clothing... (e.g. A weary knight with silver hair and a jagged scar across the left eye)"
-            defaultValue="A weary knight with silver hair and a jagged scar across the left eye"
-          ></textarea>
-        </div>
+        <div className="p-6 space-y-8">
+          {/* Physical Traits */}
+          <div>
+            <div className="text-xs font-bold text-indigo-400 tracking-wider mb-3 uppercase">Physical Traits</div>
+            <textarea 
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Describe features, hair, eyes, scars, clothing... (e.g. A weary knight with silver hair and a jagged scar across the left eye)"
+              className="w-full h-32 bg-[#1A1C23] border border-white/10 rounded-xl p-4 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors resize-none"
+            />
+          </div>
 
-        {/* Artistic Style */}
-        <div className="p-6 border-b border-white/5">
-          <div className="text-[10px] font-bold text-indigo-400 tracking-wider mb-3 uppercase">Artistic Style</div>
-          <div className="grid grid-cols-2 gap-3">
-            <button 
-              onClick={() => setStyle('oil')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-bold transition-colors ${style === 'oil' ? 'bg-indigo-600 text-white' : 'bg-[#1A1C23] border border-white/10 text-gray-400 hover:text-white hover:bg-white/5'}`}
-            >
-              <div className="w-3 h-3 rounded-full bg-gradient-to-tr from-orange-400 to-red-500"></div>
-              Oil Painting
-            </button>
-            <button 
-              onClick={() => setStyle('digital')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-bold transition-colors ${style === 'digital' ? 'bg-indigo-600 text-white' : 'bg-[#1A1C23] border border-white/10 text-gray-400 hover:text-white hover:bg-white/5'}`}
-            >
-              <div className="w-3 h-3 rounded-full bg-gradient-to-tr from-cyan-400 to-blue-500"></div>
-              Digital Art
-            </button>
-            <button 
-              onClick={() => setStyle('sketch')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-bold transition-colors ${style === 'sketch' ? 'bg-indigo-600 text-white' : 'bg-[#1A1C23] border border-white/10 text-gray-400 hover:text-white hover:bg-white/5'}`}
-            >
-              <div className="w-3 h-3 rounded-full bg-gradient-to-tr from-gray-400 to-gray-600"></div>
-              Sketch
-            </button>
-            <button 
-              onClick={() => setStyle('cinematic')}
-              className={`flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-bold transition-colors ${style === 'cinematic' ? 'bg-indigo-600 text-white' : 'bg-[#1A1C23] border border-white/10 text-gray-400 hover:text-white hover:bg-white/5'}`}
-            >
-              <div className="w-3 h-3 rounded-full bg-gradient-to-tr from-purple-400 to-pink-500"></div>
-              Cinematic
+          {/* Artistic Style */}
+          <div>
+            <div className="text-xs font-bold text-indigo-400 tracking-wider mb-3 uppercase">Artistic Style</div>
+            <div className="grid grid-cols-2 gap-3">
+              {['Oil Painting', 'Digital Art', 'Sketch', 'Cinematic'].map(s => (
+                <button 
+                  key={s}
+                  onClick={() => setStyle(s)}
+                  className={`flex items-center gap-2 px-4 py-3 rounded-xl text-sm font-medium transition-colors ${style === s ? 'bg-indigo-600 text-white' : 'bg-[#1A1C23] border border-white/10 text-gray-400 hover:text-white hover:bg-white/5'}`}
+                >
+                  {style === s && <Sparkles size={14} />}
+                  {s}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Mood & Atmosphere */}
+          <div>
+            <div className="text-xs font-bold text-indigo-400 tracking-wider mb-3 uppercase">Mood & Atmosphere</div>
+            <input 
+              type="text"
+              value={mood}
+              onChange={(e) => setMood(e.target.value)}
+              placeholder="Melancholic, Heroic, Eerie..."
+              className="w-full bg-[#1A1C23] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors mb-3"
+            />
+            <div className="flex flex-wrap gap-2">
+              {['Melancholic', 'Dark Fantasy', 'Mysterious'].map(m => (
+                <button 
+                  key={m}
+                  onClick={() => setMood(m)}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-500/10 border border-indigo-500/20 text-indigo-400 text-[10px] font-bold uppercase tracking-wider hover:bg-indigo-500/20 transition-colors"
+                >
+                  {m}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Advanced Settings */}
+          <div>
+            <button className="flex items-center justify-between w-full py-2 text-sm font-medium text-gray-400 hover:text-white transition-colors">
+              <span>Advanced Settings</span>
+              <span className="text-xs">▼</span>
             </button>
           </div>
         </div>
 
-        {/* Mood & Atmosphere */}
-        <div className="p-6 border-b border-white/5">
-          <div className="text-[10px] font-bold text-indigo-400 tracking-wider mb-3 uppercase">Mood & Atmosphere</div>
-          <input 
-            type="text" 
-            placeholder="Melancholic, Heroic, Eerie..." 
-            className="w-full bg-[#1A1C23] border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-gray-600 focus:outline-none focus:border-indigo-500 transition-colors mb-3"
-            defaultValue="Melancholic, Dark Fantasy"
-          />
-          <div className="flex flex-wrap gap-2">
-            <button 
-              onClick={() => setMood('melancholic')}
-              className={`text-[10px] font-bold px-3 py-1.5 rounded-lg border transition-colors uppercase tracking-wider ${mood === 'melancholic' ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400' : 'border-white/10 text-gray-500 hover:text-gray-300'}`}
-            >
-              Melancholic
-            </button>
-            <button 
-              onClick={() => setMood('dark_fantasy')}
-              className={`text-[10px] font-bold px-3 py-1.5 rounded-lg border transition-colors uppercase tracking-wider ${mood === 'dark_fantasy' ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400' : 'border-white/10 text-gray-500 hover:text-gray-300'}`}
-            >
-              Dark Fantasy
-            </button>
-            <button 
-              onClick={() => setMood('mysterious')}
-              className={`text-[10px] font-bold px-3 py-1.5 rounded-lg border transition-colors uppercase tracking-wider ${mood === 'mysterious' ? 'bg-indigo-500/20 border-indigo-500/50 text-indigo-400' : 'border-white/10 text-gray-500 hover:text-gray-300'}`}
-            >
-              Mysterious
-            </button>
-          </div>
-        </div>
-
-        {/* Advanced Settings */}
-        <div className="p-6">
-          <button className="w-full flex items-center justify-between text-xs font-bold text-gray-500 tracking-wider uppercase hover:text-gray-300 transition-colors">
-            Advanced Settings
-            <ChevronDown size={14} />
-          </button>
-        </div>
-
-        {/* Generate Button */}
-        <div className="mt-auto p-6 bg-[#0F111A] border-t border-white/5 sticky bottom-0 z-10">
+        <div className="mt-auto p-6 border-t border-white/5 bg-[#0F111A]">
           <button 
             onClick={handleGenerate}
             disabled={isGenerating}
-            className="w-full flex items-center justify-center gap-2 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 transition-colors text-sm font-bold text-white shadow-[0_0_20px_rgba(79,70,229,0.3)] disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-bold text-white shadow-lg shadow-indigo-500/20"
           >
             {isGenerating ? (
-              <div className="w-5 h-5 rounded-full border-2 border-white/30 border-t-white animate-spin"></div>
+              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
             ) : (
               <>
-                <RefreshCw size={18} />
+                <Sparkles size={18} />
                 Generate Portraits
               </>
             )}
           </button>
-          <div className="text-center text-[10px] font-medium text-gray-500 mt-3 uppercase tracking-wider">
+          <div className="text-center mt-3 text-[10px] font-bold text-gray-600 uppercase tracking-wider">
             Consumes 1 Creation Credit
           </div>
         </div>
       </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col relative">
-        
+      {/* Main Content - Results */}
+      <div className="flex-1 flex flex-col relative bg-[#0A0B10]">
         {/* Header */}
-        <div className="h-20 border-b border-white/5 flex items-center justify-between px-8 bg-[#0A0B10]/80 backdrop-blur-sm z-10 shrink-0">
+        <div className="h-20 border-b border-white/5 flex items-center justify-between px-8 shrink-0">
           <div>
-            <h2 className="text-2xl font-bold text-white tracking-tight mb-1">Generated Results</h2>
-            <div className="text-sm text-gray-400">Found 4 variations based on your creative prompt.</div>
+            <h2 className="text-2xl font-bold text-white mb-1">Generated Results</h2>
+            <p className="text-sm text-gray-500">Found 4 variations based on your creative prompt.</p>
           </div>
-          
           <div className="flex items-center gap-2 bg-[#1A1C23] border border-white/10 rounded-lg p-1">
-            <button className="p-2 rounded-md bg-white/10 text-white shadow-sm">
-              <LayoutGrid size={18} />
+            <button className="p-2 rounded bg-white/10 text-white shadow-sm">
+              <Grid size={16} />
             </button>
-            <button className="p-2 rounded-md text-gray-500 hover:text-white transition-colors">
-              <List size={18} />
+            <button className="p-2 rounded text-gray-500 hover:text-white transition-colors">
+              <List size={16} />
             </button>
           </div>
         </div>
 
-        {/* Image Grid */}
+        {/* Grid */}
         <div className="flex-1 overflow-y-auto p-8">
-          <div className="grid grid-cols-2 gap-8 max-w-5xl mx-auto">
-            
-            {/* Image 1 */}
-            <div className="group relative aspect-square rounded-2xl overflow-hidden bg-[#12131A] border border-white/5 shadow-2xl">
-              <img 
-                src="https://picsum.photos/seed/king/800/800" 
-                alt="Generated Portrait 1" 
-                className={`w-full h-full object-cover transition-transform duration-700 ${isGenerating ? 'opacity-50 blur-sm scale-105' : 'group-hover:scale-105'}`}
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
-                <div className="flex items-center justify-between">
-                  <div className="text-white font-medium">Variation A</div>
-                  <div className="flex gap-2">
-                    <button className="p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-colors">
-                      <Check size={16} />
+          <div className="grid grid-cols-2 gap-6 max-w-5xl mx-auto">
+            {results.map((url, i) => (
+              <div key={i} className="aspect-[4/5] rounded-2xl overflow-hidden border border-white/10 relative group bg-[#1A1C23]">
+                <img src={url} alt={`Generated portrait ${i + 1}`} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-end p-6">
+                  <div className="flex gap-3">
+                    <button className="flex-1 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold transition-colors">
+                      Save to Profile
+                    </button>
+                    <button className="px-4 py-2.5 bg-white/10 hover:bg-white/20 backdrop-blur-md text-white rounded-xl text-sm font-bold transition-colors">
+                      Variations
                     </button>
                   </div>
                 </div>
               </div>
-            </div>
-
-            {/* Image 2 */}
-            <div className="group relative aspect-square rounded-2xl overflow-hidden bg-[#12131A] border border-white/5 shadow-2xl">
-              <img 
-                src="https://picsum.photos/seed/warrior/800/800" 
-                alt="Generated Portrait 2" 
-                className={`w-full h-full object-cover transition-transform duration-700 ${isGenerating ? 'opacity-50 blur-sm scale-105' : 'group-hover:scale-105'}`}
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
-                <div className="flex items-center justify-between">
-                  <div className="text-white font-medium">Variation B</div>
-                  <div className="flex gap-2">
-                    <button className="p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-colors">
-                      <Check size={16} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Image 3 */}
-            <div className="group relative aspect-square rounded-2xl overflow-hidden bg-[#12131A] border border-white/5 shadow-2xl flex items-center justify-center">
-              {isGenerating ? (
-                <div className="w-12 h-12 border-4 border-indigo-500/30 border-t-indigo-500 rounded-full animate-spin"></div>
-              ) : (
-                <img 
-                  src="https://picsum.photos/seed/empty/800/800?blur=10" 
-                  alt="Generated Portrait 3" 
-                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-                  referrerPolicy="no-referrer"
-                />
-              )}
-            </div>
-
-            {/* Image 4 */}
-            <div className="group relative aspect-square rounded-2xl overflow-hidden bg-[#12131A] border border-white/5 shadow-2xl">
-              <img 
-                src="https://picsum.photos/seed/wizard/800/800" 
-                alt="Generated Portrait 4" 
-                className={`w-full h-full object-cover transition-transform duration-700 ${isGenerating ? 'opacity-50 blur-sm scale-105' : 'group-hover:scale-105'}`}
-                referrerPolicy="no-referrer"
-              />
-              <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex flex-col justify-end p-6">
-                <div className="flex items-center justify-between">
-                  <div className="text-white font-medium">Variation D</div>
-                  <div className="flex gap-2">
-                    <button className="p-2 bg-white/20 hover:bg-white/30 backdrop-blur-md rounded-lg text-white transition-colors">
-                      <Check size={16} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
-
+            ))}
           </div>
         </div>
 
-        {/* Footer Status Bar */}
-        <div className="h-10 border-t border-white/5 bg-[#0F111A] flex items-center justify-between px-6 shrink-0 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
+        {/* Footer Status */}
+        <div className="h-10 border-t border-white/5 bg-[#4F46E5] flex items-center justify-between px-6 text-[10px] font-bold text-white uppercase tracking-wider shrink-0">
           <div className="flex items-center gap-6">
             <div className="flex items-center gap-2">
-              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              <div className="w-2 h-2 rounded-full bg-green-400"></div>
               AI Engine Online: GPT-V4 & Diffusion XL
             </div>
             <div className="flex items-center gap-2">
-              <RefreshCw size={12} />
+              <Sparkles size={12} />
               Average Gen Time: 8.4s
             </div>
           </div>
           <div className="flex items-center gap-6">
-            <a href="#" className="hover:text-gray-300 transition-colors">Support Documentation</a>
-            <a href="#" className="hover:text-gray-300 transition-colors">Terms of Creation</a>
+            <a href="#" className="hover:underline">Support Documentation</a>
+            <a href="#" className="hover:underline">Terms of Creation</a>
           </div>
         </div>
-
       </div>
+      {/* Toast Notification */}
+      {toast && (
+        <div className={`fixed bottom-8 right-8 z-[100] px-6 py-3 rounded-xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom-4 duration-300 ${toast.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'}`}>
+          <div className="w-6 h-6 rounded-full bg-white/20 flex items-center justify-center">
+            {toast.type === 'success' ? <span className="text-sm">✓</span> : <span className="text-sm">✕</span>}
+          </div>
+          <span className="font-bold text-sm">{toast.message}</span>
+        </div>
+      )}
     </div>
   );
 }
