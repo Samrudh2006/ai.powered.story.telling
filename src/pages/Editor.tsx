@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { Book, History, Share, CheckCircle, Plus, Settings, Sparkles, Edit3, Wand2, UserSearch, RefreshCw, Send, Maximize2, Minimize2, Bold, Italic, Copy, X, Users, Ghost } from 'lucide-react';
+import { Book, History, Share, CheckCircle, Plus, Settings, Sparkles, Edit3, Wand2, UserSearch, RefreshCw, Send, Maximize2, Minimize2, Bold, Italic, Copy, X, Users, Ghost, Palette, Type, Highlighter, AlignLeft, AlignCenter, AlignRight, AlignJustify, List, ListOrdered, Quote, Undo, Redo } from 'lucide-react';
 import { db, auth } from '../firebase';
-import { doc, getDoc, updateDoc, onSnapshot, arrayUnion, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot, arrayUnion, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
+import TiptapEditor from '../components/editor/TiptapEditor';
 import { GoogleGenAI } from '@google/genai';
 
 export default function Editor() {
@@ -78,8 +79,7 @@ export default function Editor() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const newContent = e.target.value;
+  const handleContentChange = (newContent: string) => {
     setContent(newContent);
     const updatedChapters = chapters.map(ch => 
       ch.id === activeChapterId ? { ...ch, content: newContent } : ch
@@ -221,22 +221,24 @@ export default function Editor() {
     if (!promptToUse.trim()) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Context from the story:\n${content.slice(-2000)}\n\nUser Request: ${promptToUse}`,
+        model: "gemini-3-flash-preview",
+        contents: `Context from the story:\n${content.replace(/<[^>]*>/g, '').slice(-2000)}\n\nUser Request: ${promptToUse}`,
         config: {
-          systemInstruction: "You are an expert creative writing assistant, 'LoreForge Muse'. Provide helpful, creative, and concise suggestions, rewrites, or analysis based on the user's request and the provided story context. Do not include markdown formatting like bolding or italics unless specifically asked."
+          systemInstruction: "You are an expert creative writing assistant, 'LoreForge Muse'. Provide helpful, creative, and concise suggestions, rewrites, or analysis based on the user's request and the provided story context. Use rich text formatting (HTML) if appropriate for the story content."
         }
       });
-      setSuggestion(response.text || "I couldn't think of anything right now.");
+
+      if (response.text) {
+        setSuggestion(response.text);
+      } else {
+        throw new Error("Invalid response from AI API");
+      }
     } catch (e: any) {
       console.error(e);
-      if (e.message?.includes('API key not valid')) {
-        setSuggestion("Invalid Gemini API Key. Please check your environment variables.");
-      } else {
-        setSuggestion("Error connecting to Muse. Please try again later.");
-      }
+      setSuggestion("Error connecting to Muse. Please try again later.");
     }
     setIsGenerating(false);
     if (!overridePrompt) {
@@ -259,25 +261,24 @@ export default function Editor() {
   };
 
   const handleAddCollaborator = async () => {
-    if (!id || !collabEmail.trim()) return;
+    if (!id || !collabEmail.trim() || !user) return;
     try {
-      const usersRef = collection(db, 'users');
-      const q = query(usersRef, where('email', '==', collabEmail.trim()));
-      const querySnapshot = await getDocs(q);
+      // Create an invitation instead of directly adding
+      await addDoc(collection(db, 'invitations'), {
+        storyId: id,
+        storyTitle: title,
+        inviterEmail: user.email,
+        inviterName: user.displayName || 'Author',
+        inviteeEmail: collabEmail.trim(),
+        status: 'pending',
+        createdAt: Date.now()
+      });
       
-      if (!querySnapshot.empty) {
-        const userId = querySnapshot.docs[0].id;
-        await updateDoc(doc(db, 'stories', id), {
-          collaborators: arrayUnion(userId)
-        });
-        setCollabEmail('');
-        showToast('Collaborator added successfully!', 'success');
-      } else {
-        showToast('User not found with that email.', 'error');
-      }
+      setCollabEmail('');
+      showToast('Invitation sent successfully!', 'success');
     } catch (error) {
-      console.error("Error adding collaborator:", error);
-      showToast('Failed to add collaborator.', 'error');
+      console.error("Error sending invitation:", error);
+      showToast('Failed to send invitation.', 'error');
     }
   };
 
@@ -380,26 +381,10 @@ export default function Editor() {
 
         {/* Center Editor */}
         <section className="flex-1 overflow-y-auto bg-bg-dark relative scroll-smooth p-12 flex flex-col">
-          <div className="max-w-[800px] w-full mx-auto mb-6 flex items-center justify-between text-slate-400">
-            <div className="flex items-center gap-2">
-              <button onClick={() => insertFormatting('**', '**')} className="p-2 hover:bg-surface-dark rounded-lg transition-colors" title="Bold">
-                <Bold size={16} />
-              </button>
-              <button onClick={() => insertFormatting('*', '*')} className="p-2 hover:bg-surface-dark rounded-lg transition-colors" title="Italic">
-                <Italic size={16} />
-              </button>
-            </div>
-            <button onClick={() => setIsFullscreen(!isFullscreen)} className="p-2 hover:bg-surface-dark rounded-lg transition-colors" title="Toggle Distraction-Free Mode">
-              {isFullscreen ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
-            </button>
-          </div>
           <div className="max-w-[800px] w-full mx-auto flex-1">
-            <textarea
-              ref={textareaRef}
-              value={content}
-              onChange={handleContentChange}
-              className="w-full h-full min-h-[60vh] bg-transparent text-slate-300 text-lg leading-relaxed outline-none resize-none font-serif"
-              placeholder="Start writing your story here..."
+            <TiptapEditor 
+              content={content} 
+              onChange={handleContentChange} 
             />
           </div>
         </section>
@@ -469,7 +454,7 @@ export default function Editor() {
                     <div className="p-4 rounded-xl bg-primary/5 border border-primary/20 shadow-[0_0_20px_rgba(50,17,212,0.15)]">
                       <div className="flex items-center justify-between mb-3">
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-primary text-white font-bold">AI GENERATED</span>
-                        <button onClick={askMuse} className="w-6 h-6 rounded flex items-center justify-center bg-white/10 hover:bg-white/20 text-white">
+                        <button onClick={() => askMuse()} className="w-6 h-6 rounded flex items-center justify-center bg-white/10 hover:bg-white/20 text-white">
                           <RefreshCw size={12} />
                         </button>
                       </div>
@@ -532,7 +517,7 @@ export default function Editor() {
                   placeholder="Ask Muse for anything..." 
                   rows={2}
                 />
-                <button onClick={askMuse} disabled={isGenerating || !aiInput.trim()} className="absolute right-3 bottom-3 text-primary disabled:text-slate-600 hover:text-primary-hover transition-colors">
+                <button onClick={() => askMuse()} disabled={isGenerating || !aiInput.trim()} className="absolute right-3 bottom-3 text-primary disabled:text-slate-600 hover:text-primary-hover transition-colors">
                   <Send size={16} />
                 </button>
               </div>

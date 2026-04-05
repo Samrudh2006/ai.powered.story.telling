@@ -1,13 +1,14 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Book, Users, Compass, Settings, Plus, Search, Bell, BrainCircuit, Star, Timer, GitBranch, Image as ImageIcon, User, LogOut } from 'lucide-react';
+import { Book, Users, Compass, Settings, Plus, Search, Bell, BrainCircuit, Star, Timer, GitBranch, Image as ImageIcon, User, LogOut, Check, X } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { db } from '../firebase';
-import { collection, query, where, onSnapshot, addDoc, or } from 'firebase/firestore';
+import { collection, query, where, onSnapshot, addDoc, or, updateDoc, doc, arrayUnion } from 'firebase/firestore';
 
 export default function Dashboard() {
   const { user, userProfile, logout } = useAuth();
   const [stories, setStories] = useState<any[]>([]);
+  const [invitations, setInvitations] = useState<any[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [view, setView] = useState<'my-stories' | 'shared' | 'storybranch' | 'loreforge' | 'portrait' | 'settings' | 'profile'>('my-stories');
@@ -21,7 +22,7 @@ export default function Dashboard() {
       collection(db, 'stories'),
       or(
         where('authorId', '==', user.uid),
-        where('isShared', '==', true)
+        where('collaborators', 'array-contains', user.uid)
       )
     );
 
@@ -38,8 +39,53 @@ export default function Dashboard() {
       console.error("Error fetching stories:", error);
     });
 
-    return () => unsubscribe();
+    // Fetch invitations
+    const invQ = query(
+      collection(db, 'invitations'),
+      where('inviteeEmail', '==', user.email),
+      where('status', '==', 'pending')
+    );
+
+    const unsubscribeInv = onSnapshot(invQ, (snapshot) => {
+      setInvitations(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeInv();
+    };
   }, [user]);
+
+  const handleAcceptInvitation = async (invitation: any) => {
+    if (!user) return;
+    try {
+      // 1. Update invitation status
+      await updateDoc(doc(db, 'invitations', invitation.id), {
+        status: 'accepted'
+      });
+
+      // 2. Add user to story collaborators
+      await updateDoc(doc(db, 'stories', invitation.storyId), {
+        collaborators: arrayUnion(user.uid)
+      });
+
+      showToast('Invitation accepted!', 'success');
+    } catch (error) {
+      console.error("Error accepting invitation:", error);
+      showToast('Failed to accept invitation.', 'error');
+    }
+  };
+
+  const handleDeclineInvitation = async (invitationId: string) => {
+    try {
+      await updateDoc(doc(db, 'invitations', invitationId), {
+        status: 'declined'
+      });
+      showToast('Invitation declined.', 'success');
+    } catch (error) {
+      console.error("Error declining invitation:", error);
+    }
+  };
 
   const createNewStory = async () => {
     if (!user) return;
@@ -93,7 +139,7 @@ export default function Dashboard() {
   };
 
   const filteredStories = stories
-    .filter(s => view === 'my-stories' ? !s.isShared : s.isShared)
+    .filter(s => view === 'my-stories' ? s.authorId === user?.uid : s.authorId !== user?.uid)
     .filter(s => s.title.toLowerCase().includes(searchQuery.toLowerCase()) || s.genre.toLowerCase().includes(searchQuery.toLowerCase()));
 
   return (
@@ -191,10 +237,48 @@ export default function Dashboard() {
             </div>
           </div>
           <div className="flex items-center gap-4">
-            <button className="p-2 text-slate-400 hover:bg-surface-dark rounded-lg relative">
-              <Bell size={20} />
-              <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-bg-dark"></span>
-            </button>
+            <div className="relative group">
+              <button className="p-2 text-slate-400 hover:bg-surface-dark rounded-lg relative">
+                <Bell size={20} />
+                {invitations.length > 0 && <span className="absolute top-2 right-2 w-2 h-2 bg-red-500 rounded-full border-2 border-bg-dark"></span>}
+              </button>
+              
+              {/* Notifications Dropdown */}
+              <div className="absolute right-0 mt-2 w-80 bg-surface-dark border border-border-dark rounded-xl shadow-2xl hidden group-hover:block z-50 overflow-hidden">
+                <div className="p-4 border-b border-border-dark bg-bg-dark/50">
+                  <h3 className="text-sm font-bold">Notifications</h3>
+                </div>
+                <div className="max-h-96 overflow-y-auto">
+                  {invitations.length === 0 ? (
+                    <div className="p-8 text-center text-slate-500 text-xs">
+                      No new notifications
+                    </div>
+                  ) : (
+                    invitations.map(inv => (
+                      <div key={inv.id} className="p-4 border-b border-border-dark hover:bg-white/5 transition-colors">
+                        <p className="text-xs text-slate-300 mb-2">
+                          <span className="font-bold text-white">{inv.inviterName}</span> invited you to collaborate on <span className="font-bold text-primary">"{inv.storyTitle}"</span>
+                        </p>
+                        <div className="flex gap-2">
+                          <button 
+                            onClick={() => handleAcceptInvitation(inv)}
+                            className="flex-1 py-1.5 bg-primary text-white rounded-lg text-[10px] font-bold hover:opacity-90 transition-opacity flex items-center justify-center gap-1"
+                          >
+                            <Check size={12} /> Accept
+                          </button>
+                          <button 
+                            onClick={() => handleDeclineInvitation(inv.id)}
+                            className="flex-1 py-1.5 bg-surface-dark text-slate-400 rounded-lg text-[10px] font-bold hover:text-white transition-colors flex items-center justify-center gap-1"
+                          >
+                            <X size={12} /> Decline
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
             <button onClick={createNewStory} className="flex items-center gap-2 bg-primary text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-primary-hover transition-colors">
               <Plus size={16} />
               New Project

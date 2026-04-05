@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Plus, Sparkles, Share, Edit3, User, Activity, Clock, Map, FileText, ChevronRight, Zap, X, GitBranch, Trash2 } from 'lucide-react';
 import { db, auth } from '../../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, or } from 'firebase/firestore';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 
 interface Story {
   id: string;
@@ -16,6 +16,7 @@ interface Character {
   name: string;
   role: string;
   description: string;
+  quirk?: string;
   imageUrl: string;
   authorId: string;
   createdAt: number;
@@ -33,7 +34,7 @@ export default function LoreForge() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [generatedImageUrl, setGeneratedImageUrl] = useState<string | null>(null);
   const [isEditingProfile, setIsEditingProfile] = useState(false);
-  const [editCharData, setEditCharData] = useState({ name: '', role: '', description: '' });
+  const [editCharData, setEditCharData] = useState({ name: '', role: '', description: '', quirk: '' });
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
 
   const showToast = (message: string, type: 'success' | 'error') => {
@@ -94,7 +95,8 @@ export default function LoreForge() {
     if (!activeCharacter) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
         contents: {
@@ -139,7 +141,8 @@ export default function LoreForge() {
     setEditCharData({
       name: activeCharacter.name,
       role: activeCharacter.role,
-      description: activeCharacter.description
+      description: activeCharacter.description,
+      quirk: activeCharacter.quirk || ''
     });
     setIsEditingProfile(true);
   };
@@ -154,6 +157,47 @@ export default function LoreForge() {
     } catch (error) {
       console.error("Error saving profile:", error);
     }
+  };
+
+  const handleGenerateAICharacter = async () => {
+    setIsGenerating(true);
+    try {
+      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: "Generate a new character for a fantasy story.",
+        config: {
+          systemInstruction: "You are a creative character designer. Generate a unique character for a story. Return ONLY a JSON object with 'name', 'role', 'description' (max 200 chars), and 'quirk' (max 100 chars).",
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              role: { type: Type.STRING },
+              description: { type: Type.STRING },
+              quirk: { type: Type.STRING }
+            },
+            required: ["name", "role", "description", "quirk"]
+          }
+        }
+      });
+
+      if (response.text) {
+        const result = JSON.parse(response.text);
+        if (result.name) {
+          setNewCharName(result.name);
+          setNewCharRole(result.role || 'Supporting');
+          showToast('AI character generated! Review and click Create.', 'success');
+        }
+      } else {
+        throw new Error("Invalid response from AI API");
+      }
+    } catch (error) {
+      console.error("Error generating AI character:", error);
+      showToast('Failed to generate AI character.', 'error');
+    }
+    setIsGenerating(false);
   };
 
   const handleAddCharacter = async () => {
@@ -282,6 +326,12 @@ export default function LoreForge() {
                     <p className="text-gray-400 text-lg leading-relaxed max-w-2xl">
                       {activeCharacter.description}
                     </p>
+                    {activeCharacter.quirk && (
+                      <div className="mt-4 p-3 bg-indigo-500/5 border border-indigo-500/10 rounded-xl">
+                        <span className="text-[10px] font-bold text-indigo-400 uppercase tracking-widest block mb-1">Unique Quirk</span>
+                        <p className="text-sm text-gray-300 italic">"{activeCharacter.quirk}"</p>
+                      </div>
+                    )}
                     <div className="flex items-center gap-2 mt-3">
                       <span className="bg-white/5 border border-white/10 text-gray-400 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">Unknown Age</span>
                       <span className="bg-white/5 border border-white/10 text-gray-400 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">Unknown Species</span>
@@ -412,7 +462,17 @@ export default function LoreForge() {
           <div className="bg-[#12131A] border border-white/10 rounded-2xl w-full max-w-md p-6 shadow-2xl">
             <div className="flex justify-between items-center mb-4">
               <h2 className="text-xl font-bold text-white">Create New Character</h2>
-              <button onClick={() => setIsAddingCharacter(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+              <div className="flex items-center gap-4">
+                <button 
+                  onClick={handleGenerateAICharacter}
+                  disabled={isGenerating}
+                  className="flex items-center gap-2 text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  <Sparkles size={14} />
+                  AI Generate
+                </button>
+                <button onClick={() => setIsAddingCharacter(false)} className="text-gray-400 hover:text-white"><X size={20}/></button>
+              </div>
             </div>
             <input 
               type="text" 
@@ -550,6 +610,16 @@ export default function LoreForge() {
                   value={editCharData.description}
                   onChange={(e) => setEditCharData({ ...editCharData, description: e.target.value })}
                   className="w-full bg-[#1A1C23] border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500 resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Unique Quirk</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g., Always carries a silver coin"
+                  value={editCharData.quirk}
+                  onChange={(e) => setEditCharData({ ...editCharData, quirk: e.target.value })}
+                  className="w-full bg-[#1A1C23] border border-white/10 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-indigo-500"
                 />
               </div>
             </div>

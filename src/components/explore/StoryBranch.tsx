@@ -3,7 +3,7 @@ import { Search, Plus, Users, LayoutGrid, List, Sparkles, GitBranch, Settings, M
 import { db, auth } from '../../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, arrayUnion, or } from 'firebase/firestore';
 import { motion } from 'motion/react';
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, Type } from '@google/genai';
 
 interface Story {
   id: string;
@@ -137,50 +137,60 @@ export default function StoryBranch() {
     
     setIsGeneratingAI(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY });
+      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
-        model: 'gemini-3-flash-preview',
-        contents: `Based on this story context, suggest a new interesting plot branch or twist. Return ONLY a JSON object with 'title' (max 50 chars) and 'content' (max 300 chars).\n\nContext:\n${contextNodes}`,
+        model: "gemini-3-flash-preview",
+        contents: `Based on the story context, suggest a new interesting plot branch or twist. Context:\n${contextNodes}`,
         config: {
+          systemInstruction: "You are an expert creative writing assistant. Suggest a new interesting plot branch or twist. Return ONLY a JSON object with 'title' (max 50 chars) and 'content' (max 300 chars).",
           responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              title: { type: Type.STRING },
+              content: { type: Type.STRING }
+            },
+            required: ["title", "content"]
+          }
         }
       });
-      
-      const result = JSON.parse(response.text || '{}');
-      
-      if (result.title && result.content) {
-        const parentNode = nodes.length > 0 ? nodes[nodes.length - 1] : null;
-        const startX = parentNode ? parentNode.x + 250 : 100;
-        const startY = parentNode ? parentNode.y + 150 : 100;
 
-        const nodeData: any = {
-          title: result.title,
-          content: result.content,
-          x: startX + (Math.random() * 50 - 25),
-          y: startY + (Math.random() * 100 - 50),
-          type: 'ai',
-          authorId: auth.currentUser.uid,
-          authorName: 'AI Assistant',
-          createdAt: Date.now()
-        };
+      if (response.text) {
+        const result = JSON.parse(response.text);
         
-        if (parentNode) {
-          nodeData.parentId = parentNode.id;
-        }
+        if (result.title && result.content) {
+          const parentNode = nodes.length > 0 ? nodes[nodes.length - 1] : null;
+          const startX = parentNode ? parentNode.x + 250 : 100;
+          const startY = parentNode ? parentNode.y + 150 : 100;
 
-        await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), nodeData);
-        showToast('AI suggestion added!', 'success');
-        setActiveTimeline('ai');
+          const nodeData: any = {
+            title: result.title,
+            content: result.content,
+            x: startX + (Math.random() * 50 - 25),
+            y: startY + (Math.random() * 100 - 50),
+            type: 'ai',
+            authorId: auth.currentUser.uid,
+            authorName: 'AI Assistant',
+            createdAt: Date.now()
+          };
+          
+          if (parentNode) {
+            nodeData.parentId = parentNode.id;
+          }
+
+          await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), nodeData);
+          showToast('AI suggestion added!', 'success');
+          setActiveTimeline('ai');
+        } else {
+          throw new Error("Invalid AI response format");
+        }
       } else {
-        throw new Error("Invalid AI response format");
+        throw new Error("Invalid response from AI API");
       }
     } catch (error: any) {
       console.error("Error generating AI suggestion:", error);
-      if (error.message?.includes('API key not valid')) {
-        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
-      } else {
-        showToast('Failed to generate AI suggestion.', 'error');
-      }
+      showToast('Failed to generate AI suggestion.', 'error');
     }
     setIsGeneratingAI(false);
   };

@@ -122,7 +122,18 @@ service cloud.firestore {
              data.createdAt is number &&
              (!('role' in data) || data.role is string && data.role.size() <= 50) &&
              (!('description' in data) || data.description is string) &&
+             (!('quirk' in data) || data.quirk is string && data.quirk.size() <= 200) &&
              (!('imageUrl' in data) || data.imageUrl is string);
+    }
+
+    function isValidInvitation(data) {
+      return data.storyId is string &&
+             data.storyTitle is string &&
+             data.inviterEmail is string &&
+             data.inviterName is string &&
+             data.inviteeEmail is string &&
+             data.status in ['pending', 'accepted', 'declined'] &&
+             data.createdAt is number;
     }
 
     // ===============================================================
@@ -133,6 +144,13 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if isOwner(userId) && hasRequiredFields(['email', 'createdAt']) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    match /invitations/{invitationId} {
+      allow read: if isAuthenticated() && (request.auth.token.email == resource.data.inviteeEmail || request.auth.token.email == resource.data.inviterEmail);
+      allow create: if isAuthenticated() && request.resource.data.inviterEmail == request.auth.token.email && isValidInvitation(request.resource.data);
+      allow update: if isAuthenticated() && (request.auth.token.email == resource.data.inviteeEmail || request.auth.token.email == resource.data.inviterEmail) && isValidInvitation(request.resource.data);
+      allow delete: if isAuthenticated() && (request.auth.token.email == resource.data.inviteeEmail || request.auth.token.email == resource.data.inviterEmail);
     }
 
     match /stories/{storyId} {

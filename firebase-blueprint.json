@@ -81,11 +81,27 @@
         "name": { "type": "string" },
         "role": { "type": "string" },
         "description": { "type": "string" },
+        "quirk": { "type": "string" },
         "imageUrl": { "type": "string" },
         "authorId": { "type": "string" },
         "createdAt": { "type": "number" }
       },
       "required": ["name", "authorId", "createdAt"]
+    },
+    "Invitation": {
+      "title": "Invitation",
+      "description": "A collaborator invitation for a story.",
+      "type": "object",
+      "properties": {
+        "storyId": { "type": "string" },
+        "storyTitle": { "type": "string" },
+        "inviterEmail": { "type": "string" },
+        "inviterName": { "type": "string" },
+        "inviteeEmail": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "accepted", "declined"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["storyId", "inviterEmail", "inviteeEmail", "status", "createdAt"]
     }
   },
   "firestore": {
@@ -104,6 +120,10 @@
     "/users/{userId}": {
       "schema": { "$ref": "#/entities/User" },
       "description": "User profiles."
+    },
+    "/invitations/{invitationId}": {
+      "schema": { "$ref": "#/entities/Invitation" },
+      "description": "Collaborator invitations."
     }
   }
 }

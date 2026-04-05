@@ -24,7 +24,8 @@ export default function PortraitStudio() {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     try {
-      const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY });
+      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const ai = new GoogleGenAI({ apiKey });
       const fullPrompt = `${prompt}, style: ${style}, mood: ${mood}`;
       
       const response = await ai.models.generateContent({
