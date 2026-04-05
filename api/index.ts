@@ -15,7 +15,7 @@ app.post('/api/ai/generate-character', async (req, res) => {
   try {
     const { genre = 'fantasy' } = req.body;
     const { output } = await generateText({
-      model: groq('llama-3.1-8b-instant'),
+      model: groq('llama-3.3-70b-versatile'),
       output: Output.object({
         schema: z.object({
           name: z.string().describe('A unique character name'),
@@ -37,7 +37,7 @@ app.post('/api/ai/generate-plot', async (req, res) => {
   try {
     const { context = '', genre = 'fantasy' } = req.body;
     const { output } = await generateText({
-      model: groq('llama-3.1-8b-instant'),
+      model: groq('llama-3.3-70b-versatile'),
       output: Output.object({
         schema: z.object({
           title: z.string().describe('A short title for the plot point, max 50 characters'),
@@ -77,7 +77,7 @@ ${content}
 Dialogue:`;
     }
     const { text } = await generateText({
-      model: groq('llama-3.1-8b-instant'),
+      model: groq('llama-3.3-70b-versatile'),
       prompt,
       maxOutputTokens: 500,
     });
@@ -92,7 +92,7 @@ app.post('/api/ai/portrait-description', async (req, res) => {
   try {
     const { characterName, characterDescription, style = 'Digital Art' } = req.body;
     const { output } = await generateText({
-      model: groq('llama-3.1-8b-instant'),
+      model: groq('llama-3.3-70b-versatile'),
       output: Output.object({
         schema: z.object({
           visualDescription: z.string().describe('A detailed visual description of the character portrait'),
