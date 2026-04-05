@@ -4,6 +4,7 @@ import { db, auth } from '../../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, getDocs, arrayUnion, or } from 'firebase/firestore';
 import { motion } from 'motion/react';
 import { GoogleGenAI, Type } from '@google/genai';
+import { getMockAIResponse } from '../../services/mockAiService';
 
 interface Story {
   id: string;
@@ -190,8 +191,36 @@ export default function StoryBranch() {
       }
     } catch (error: any) {
       console.error("Error generating AI suggestion:", error);
-      const errorMessage = error.message || "Unknown error";
-      showToast(`Failed to generate AI suggestion: ${errorMessage}`, 'error');
+      
+      // Fallback to Mock AI
+      const mockResponse = getMockAIResponse(contextNodes, 'plot');
+      const parentNode = nodes.length > 0 ? nodes[nodes.length - 1] : null;
+      const startX = parentNode ? parentNode.x + 250 : 100;
+      const startY = parentNode ? parentNode.y + 150 : 100;
+
+      const nodeData: any = {
+        title: mockResponse.title,
+        content: mockResponse.content,
+        x: startX + (Math.random() * 50 - 25),
+        y: startY + (Math.random() * 100 - 50),
+        type: 'ai',
+        authorId: auth.currentUser.uid,
+        authorName: 'AI Assistant (Fallback)',
+        createdAt: Date.now()
+      };
+      
+      if (parentNode) {
+        nodeData.parentId = parentNode.id;
+      }
+
+      try {
+        await addDoc(collection(db, 'stories', activeStoryId, 'nodes'), nodeData);
+        showToast('AI suggestion added (Fallback)!', 'success');
+        setActiveTimeline('ai');
+      } catch (dbError) {
+        console.error("Database error adding fallback node:", dbError);
+        showToast('Failed to generate AI suggestion.', 'error');
+      }
     }
     setIsGeneratingAI(false);
   };

@@ -17,6 +17,7 @@ import {
 interface TiptapEditorProps {
   content: string;
   onChange: (content: string) => void;
+  bgColor?: string;
 }
 
 const MenuBar = ({ editor }: { editor: any }) => {
@@ -41,6 +42,15 @@ const MenuBar = ({ editor }: { editor: any }) => {
     { name: 'Blue', value: '#60a5fa' },
     { name: 'Purple', value: '#c084fc' },
     { name: 'Pink', value: '#f472b6' },
+  ];
+
+  const highlightColors = [
+    { name: 'Yellow', value: '#fef08a' },
+    { name: 'Green', value: '#bbf7d0' },
+    { name: 'Blue', value: '#bfdbfe' },
+    { name: 'Pink', value: '#fbcfe8' },
+    { name: 'Purple', value: '#e9d5ff' },
+    { name: 'None', value: 'transparent' },
   ];
 
   return (
@@ -154,13 +164,31 @@ const MenuBar = ({ editor }: { editor: any }) => {
           </div>
         </div>
 
-        <button
-          onClick={() => editor.chain().focus().toggleHighlight().run()}
-          className={`p-1.5 rounded hover:bg-white/5 transition-colors ${editor.isActive('highlight') ? 'text-primary bg-primary/10' : 'text-gray-400'}`}
-          title="Highlight"
-        >
-          <Highlighter size={16} />
-        </button>
+        <div className="group relative">
+          <button
+            className={`p-1.5 rounded hover:bg-white/5 transition-colors ${editor.isActive('highlight') ? 'text-primary bg-primary/10' : 'text-gray-400'}`}
+            title="Highlight"
+          >
+            <Highlighter size={16} />
+          </button>
+          <div className="absolute top-full left-0 mt-1 hidden group-hover:grid grid-cols-3 gap-1 p-2 bg-[#1A1C23] border border-white/10 rounded-lg shadow-xl z-20">
+            {highlightColors.map(color => (
+              <button
+                key={color.value}
+                onClick={() => {
+                  if (color.value === 'transparent') {
+                    editor.chain().focus().unsetHighlight().run();
+                  } else {
+                    editor.chain().focus().setHighlight({ color: color.value }).run();
+                  }
+                }}
+                className="w-5 h-5 rounded-full border border-white/10"
+                style={{ backgroundColor: color.value === 'transparent' ? '#333' : color.value }}
+                title={color.name}
+              />
+            ))}
+          </div>
+        </div>
       </div>
 
       <div className="flex items-center gap-1 pl-2">
@@ -185,7 +213,7 @@ const MenuBar = ({ editor }: { editor: any }) => {
   );
 };
 
-export default function TiptapEditor({ content, onChange }: TiptapEditorProps) {
+export default function TiptapEditor({ content, onChange, bgColor = '#0A0B10' }: TiptapEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -217,7 +245,10 @@ export default function TiptapEditor({ content, onChange }: TiptapEditorProps) {
   }, [content, editor]);
 
   return (
-    <div className="w-full border border-white/10 rounded-xl overflow-hidden bg-[#0A0B10]/50">
+    <div 
+      className="w-full border border-white/10 rounded-xl overflow-hidden transition-colors duration-300"
+      style={{ backgroundColor: bgColor }}
+    >
       <MenuBar editor={editor} />
       <EditorContent editor={editor} />
     </div>

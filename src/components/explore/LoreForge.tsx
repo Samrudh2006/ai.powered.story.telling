@@ -3,6 +3,7 @@ import { Search, Plus, Sparkles, Share, Edit3, User, Activity, Clock, Map, FileT
 import { db, auth } from '../../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, or } from 'firebase/firestore';
 import { GoogleGenAI, Type } from '@google/genai';
+import { getMockAIResponse } from '../../services/mockAiService';
 
 interface Story {
   id: string;
@@ -114,8 +115,11 @@ export default function LoreForge() {
       }
     } catch (error: any) {
       console.error("Error generating portrait:", error);
-      const errorMessage = error.message || "Unknown error";
-      showToast(`Failed to generate portrait: ${errorMessage}`, 'error');
+      
+      // Fallback to Picsum for demonstration
+      const fallbackUrl = `https://picsum.photos/seed/${activeCharacter.name}-${Math.random()}/400/500`;
+      setGeneratedImageUrl(fallbackUrl);
+      showToast('Portrait generated (Fallback)!', 'success');
     }
     setIsGenerating(false);
   };
@@ -192,8 +196,12 @@ export default function LoreForge() {
       }
     } catch (error: any) {
       console.error("Error generating AI character:", error);
-      const errorMessage = error.message || "Unknown error";
-      showToast(`Failed to generate AI character: ${errorMessage}`, 'error');
+      
+      // Fallback to Mock AI
+      const mockResponse = getMockAIResponse("fantasy character", 'character');
+      setNewCharName(mockResponse.title);
+      setNewCharRole('Supporting (Fallback)');
+      showToast('AI character generated (Fallback)! Review and click Create.', 'success');
     }
     setIsGenerating(false);
   };

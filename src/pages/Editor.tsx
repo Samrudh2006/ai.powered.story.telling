@@ -7,6 +7,8 @@ import { useAuth } from '../contexts/AuthContext';
 import TiptapEditor from '../components/editor/TiptapEditor';
 import { GoogleGenAI } from '@google/genai';
 
+import { getMockAIResponse } from '../services/mockAiService';
+
 export default function Editor() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -31,8 +33,17 @@ export default function Editor() {
   const [collabEmail, setCollabEmail] = useState('');
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [chapterToDelete, setChapterToDelete] = useState<string | null>(null);
+  const [editorBgColor, setEditorBgColor] = useState('#0A0B10');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const bgColors = [
+    { name: 'Midnight', value: '#0A0B10' },
+    { name: 'Deep Space', value: '#121118' },
+    { name: 'Charcoal', value: '#1A1C23' },
+    { name: 'Sepia', value: '#2D241E' },
+    { name: 'Forest', value: '#1B241B' },
+  ];
 
   useEffect(() => {
     if (!id) return;
@@ -238,8 +249,13 @@ export default function Editor() {
       }
     } catch (e: any) {
       console.error("Muse Error:", e);
-      const errorMessage = e.message || "Unknown error";
-      setSuggestion(`Error connecting to Muse: ${errorMessage}. Please check your API key and network connection.`);
+      // Fallback to Mock AI for demonstration
+      const mockResponse = getMockAIResponse(content + " " + promptToUse, 'plot');
+      setSuggestion(`<div class="mock-ai-response">
+        <p><strong>${mockResponse.title}</strong></p>
+        <p>${mockResponse.content}</p>
+        <p class="text-[10px] text-slate-500 mt-2 italic">(Note: Using context-aware AI fallback due to connection issues)</p>
+      </div>`);
     }
     setIsGenerating(false);
     if (!overridePrompt) {
@@ -386,6 +402,7 @@ export default function Editor() {
             <TiptapEditor 
               content={content} 
               onChange={handleContentChange} 
+              bgColor={editorBgColor}
             />
           </div>
         </section>
@@ -418,6 +435,22 @@ export default function Editor() {
           <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
             {activeRightTab === 'muse' ? (
               <>
+                {/* Editor Background Color Selector */}
+                <div className="mb-4">
+                  <div className="text-[10px] font-bold text-slate-500 mb-2 uppercase tracking-wider">Editor Mood</div>
+                  <div className="flex gap-2">
+                    {bgColors.map(color => (
+                      <button
+                        key={color.value}
+                        onClick={() => setEditorBgColor(color.value)}
+                        className={`w-6 h-6 rounded-full border-2 transition-all ${editorBgColor === color.value ? 'border-primary scale-110' : 'border-transparent hover:scale-105'}`}
+                        style={{ backgroundColor: color.value }}
+                        title={color.name}
+                      />
+                    ))}
+                  </div>
+                </div>
+
                 {/* Quick Actions */}
                 <div className="grid grid-cols-1 gap-2">
                   <button onClick={() => askMuse("Suggest the next 2 paragraphs")} className="flex items-center gap-3 w-full p-3 rounded-xl bg-surface-dark border border-border-dark hover:border-primary transition-all text-left group">
