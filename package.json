@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@ai-sdk/deepseek": "^2.0.27",
+    "@ai-sdk/groq": "^3.0.33",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.14",
     "@tiptap/extension-color": "^3.22.2",

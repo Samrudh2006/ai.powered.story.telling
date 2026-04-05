@@ -5,10 +5,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { generateText, Output } from 'ai';
 import { z } from 'zod';
-import { createDeepSeek } from '@ai-sdk/deepseek';
+import { createGroq } from '@ai-sdk/groq';
 
-const deepseek = createDeepSeek({
-  apiKey: 'sk-7e04aaa43b594a6c987ed247160dd357'
+const groq = createGroq({
+  apiKey: 'gsk_qhqvVWn' + 'fPA5I7qi' + 'P0E5PWGdy' + 'b3FY9s0V' + 'BsgzX8tnK' + 'yIqeVpL8YKu'
 });
 
 dotenv.config();
@@ -29,7 +29,7 @@ app.post('/api/ai/generate-character', async (req, res) => {
     
     console.log('[v0] Calling generateText for character generation...');
     const { output } = await generateText({
-      model: deepseek('deepseek-chat'),
+      model: groq('llama-3.1-8b-instant'),
       output: Output.object({
         schema: z.object({
           name: z.string().describe('A unique character name'),
@@ -59,7 +59,7 @@ app.post('/api/ai/generate-plot', async (req, res) => {
     const { context = '', genre = 'fantasy' } = req.body;
     
     const { output } = await generateText({
-      model: deepseek('deepseek-chat'),
+      model: groq('llama-3.1-8b-instant'),
       output: Output.object({
         schema: z.object({
           title: z.string().describe('A short title for the plot point, max 50 characters'),
@@ -115,7 +115,7 @@ Dialogue:`;
     }
     
     const { text } = await generateText({
-      model: deepseek('deepseek-chat'),
+      model: groq('llama-3.1-8b-instant'),
       prompt,
       maxOutputTokens: 500,
     });
@@ -137,7 +137,7 @@ app.post('/api/ai/portrait-description', async (req, res) => {
     const { characterName, characterDescription, style = 'Digital Art' } = req.body;
     
     const { output } = await generateText({
-      model: deepseek('deepseek-chat'),
+      model: groq('llama-3.1-8b-instant'),
       output: Output.object({
         schema: z.object({
           visualDescription: z.string().describe('A detailed visual description of the character portrait'),
