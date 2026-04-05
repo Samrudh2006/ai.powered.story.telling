@@ -11,7 +11,8 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
-    "@google/genai": "^1.48.0",
+    "ai": "^6.0.0",
+    "zod": "^3.24.0",
     "@tailwindcss/typography": "^0.5.19",
     "@tailwindcss/vite": "^4.1.14",
     "@tiptap/extension-color": "^3.22.2",

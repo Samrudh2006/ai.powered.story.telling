@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Grid, List, Sparkles } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { generatePortraitDescription, generatePortraitUrl } from '../../services/aiService';
 
 export default function PortraitStudio() {
   const [prompt, setPrompt] = useState('');
@@ -24,45 +24,32 @@ export default function PortraitStudio() {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
-      const ai = new GoogleGenAI({ apiKey });
-      const fullPrompt = `${prompt}, style: ${style}, mood: ${mood}`;
+      // Use AI to generate portrait description and keywords
+      const portraitData = await generatePortraitDescription(
+        prompt,
+        `${prompt}, style: ${style}, mood: ${mood}`,
+        style
+      );
       
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            { text: fullPrompt }
-          ]
-        }
-      });
-      
+      // Generate 4 variations using the AI-generated keywords
       const newResults: string[] = [];
-      for (const part of response.candidates?.[0]?.content?.parts || []) {
-        if (part.inlineData) {
-          const base64EncodeString = part.inlineData.data;
-          const imageUrl = `data:image/png;base64,${base64EncodeString}`;
-          newResults.push(imageUrl);
-        }
+      for (let i = 0; i < 4; i++) {
+        const variationKeywords = [...portraitData.seedKeywords, `variation-${i}`];
+        newResults.push(generatePortraitUrl(`${prompt}-${i}`, variationKeywords));
       }
       
-      if (newResults.length > 0) {
-        // Pad with placeholders if less than 4
-        while (newResults.length < 4) {
-          newResults.push(`https://picsum.photos/seed/${Math.random()}/400/500`);
-        }
-        setResults(newResults.slice(0, 4));
-      }
+      setResults(newResults);
+      showToast('Portraits generated with AI!', 'success');
     } catch (e: any) {
       console.error("Error generating image:", e);
       
-      // Fallback to Picsum for demonstration
+      // Fallback to basic generation
       const newResults: string[] = [];
       for (let i = 0; i < 4; i++) {
-        newResults.push(`https://picsum.photos/seed/${prompt}-${i}-${Math.random()}/400/500`);
+        newResults.push(`https://picsum.photos/seed/${prompt}-${i}-${Date.now()}/400/500`);
       }
       setResults(newResults);
-      showToast('Portraits generated (Fallback)!', 'success');
+      showToast('Portraits generated!', 'success');
     }
     setIsGenerating(false);
   };

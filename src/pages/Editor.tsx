@@ -5,9 +5,7 @@ import { db, auth } from '../firebase';
 import { doc, getDoc, updateDoc, onSnapshot, arrayUnion, collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { useAuth } from '../contexts/AuthContext';
 import TiptapEditor from '../components/editor/TiptapEditor';
-import { GoogleGenAI } from '@google/genai';
-
-import { getMockAIResponse } from '../services/mockAiService';
+import { generateWritingSuggestion } from '../services/aiService';
 
 export default function Editor() {
   const { id } = useParams();
@@ -232,29 +230,26 @@ export default function Editor() {
     if (!promptToUse.trim()) return;
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: `Context from the story:\n${content.replace(/<[^>]*>/g, '').slice(-2000)}\n\nUser Request: ${promptToUse}`,
-        config: {
-          systemInstruction: "You are an expert creative writing assistant, 'LoreForge Muse'. Provide helpful, creative, and concise suggestions, rewrites, or analysis based on the user's request and the provided story context. Use rich text formatting (HTML) if appropriate for the story content."
-        }
-      });
-
-      if (response.text) {
-        setSuggestion(response.text);
-      } else {
-        throw new Error("Invalid response from AI API");
+      // Determine the type of suggestion based on the prompt
+      let type: 'continuation' | 'improve' | 'dialogue' = 'continuation';
+      const lowerPrompt = promptToUse.toLowerCase();
+      if (lowerPrompt.includes('rewrite') || lowerPrompt.includes('improve') || lowerPrompt.includes('dramatic')) {
+        type = 'improve';
+      } else if (lowerPrompt.includes('dialogue') || lowerPrompt.includes('conversation')) {
+        type = 'dialogue';
       }
+
+      // Get the plain text content for context
+      const plainTextContent = content.replace(/<[^>]*>/g, '').slice(-2000);
+      const contextWithPrompt = `${plainTextContent}\n\nUser Request: ${promptToUse}`;
+      
+      const suggestion = await generateWritingSuggestion(contextWithPrompt, type, 'fantasy');
+      setSuggestion(suggestion);
     } catch (e: any) {
       console.error("Muse Error:", e);
-      // Fallback to Mock AI for demonstration
-      const mockResponse = getMockAIResponse(content + " " + promptToUse, 'plot');
-      setSuggestion(`<div class="mock-ai-response">
-        <p><strong>${mockResponse.title}</strong></p>
-        <p>${mockResponse.content}</p>
-        <p class="text-[10px] text-slate-500 mt-2 italic">(Note: Using context-aware AI fallback due to connection issues)</p>
+      setSuggestion(`<div class="ai-error">
+        <p class="text-red-400">Unable to generate suggestion. Please try again.</p>
+        <p class="text-[10px] text-slate-500 mt-2">${e.message || 'Unknown error'}</p>
       </div>`);
     }
     setIsGenerating(false);
