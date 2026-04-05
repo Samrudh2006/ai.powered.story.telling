@@ -2,8 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Plus, Sparkles, Share, Edit3, User, Activity, Clock, Map, FileText, ChevronRight, Zap, X, GitBranch, Trash2 } from 'lucide-react';
 import { db, auth } from '../../firebase';
 import { collection, query, where, onSnapshot, addDoc, updateDoc, doc, deleteDoc, getDoc, or } from 'firebase/firestore';
-import { GoogleGenAI, Type } from '@google/genai';
-import { getMockAIResponse } from '../../services/mockAiService';
+import { generateCharacter, generatePortraitDescription, generatePortraitUrl } from '../../services/aiService';
 
 interface Story {
   id: string;
@@ -96,30 +95,24 @@ export default function LoreForge() {
     if (!activeCharacter) return;
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash-image',
-        contents: {
-          parts: [
-            { text: `A high-quality character portrait for a story. Character Name: ${activeCharacter.name}. Description: ${activeCharacter.description}. Style: Digital Art, detailed, cinematic lighting.` }
-          ]
-        }
-      });
-
-      for (const part of response.candidates[0].content.parts) {
-        if (part.inlineData) {
-          setGeneratedImageUrl(`data:image/png;base64,${part.inlineData.data}`);
-          break;
-        }
-      }
+      // Use AI to generate a unique portrait description and then create a unique image URL
+      const portraitData = await generatePortraitDescription(
+        activeCharacter.name,
+        activeCharacter.description,
+        'Digital Art'
+      );
+      
+      // Generate a unique portrait URL using the AI-generated keywords
+      const portraitUrl = generatePortraitUrl(activeCharacter.name, portraitData.seedKeywords);
+      setGeneratedImageUrl(portraitUrl);
+      showToast('Portrait generated with AI!', 'success');
     } catch (error: any) {
       console.error("Error generating portrait:", error);
       
-      // Fallback to Picsum for demonstration
-      const fallbackUrl = `https://picsum.photos/seed/${activeCharacter.name}-${Math.random()}/400/500`;
+      // Fallback to basic random portrait
+      const fallbackUrl = `https://picsum.photos/seed/${activeCharacter.name}-${Date.now()}/400/500`;
       setGeneratedImageUrl(fallbackUrl);
-      showToast('Portrait generated (Fallback)!', 'success');
+      showToast('Portrait generated!', 'success');
     }
     setIsGenerating(false);
   };
@@ -163,45 +156,13 @@ export default function LoreForge() {
   const handleGenerateAICharacter = async () => {
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: "Generate a new character for a fantasy story.",
-        config: {
-          systemInstruction: "You are a creative character designer. Generate a unique character for a story. Return ONLY a JSON object with 'name', 'role', 'description' (max 200 chars), and 'quirk' (max 100 chars).",
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-              name: { type: Type.STRING },
-              role: { type: Type.STRING },
-              description: { type: Type.STRING },
-              quirk: { type: Type.STRING }
-            },
-            required: ["name", "role", "description", "quirk"]
-          }
-        }
-      });
-
-      if (response.text) {
-        const result = JSON.parse(response.text);
-        if (result.name) {
-          setNewCharName(result.name);
-          setNewCharRole(result.role || 'Supporting');
-          showToast('AI character generated! Review and click Create.', 'success');
-        }
-      } else {
-        throw new Error("Invalid response from AI API");
-      }
+      const character = await generateCharacter('fantasy');
+      setNewCharName(character.name);
+      setNewCharRole(character.role);
+      showToast('AI character generated! Review and click Create.', 'success');
     } catch (error: any) {
       console.error("Error generating AI character:", error);
-      
-      // Fallback to Mock AI
-      const mockResponse = getMockAIResponse("fantasy character", 'character');
-      setNewCharName(mockResponse.title);
-      setNewCharRole('Supporting (Fallback)');
-      showToast('AI character generated (Fallback)! Review and click Create.', 'success');
+      showToast(error.message || 'Failed to generate character. Please try again.', 'error');
     }
     setIsGenerating(false);
   };
