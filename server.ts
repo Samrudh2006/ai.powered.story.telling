@@ -18,9 +18,11 @@ app.use(express.json());
 
 // Generate character
 app.post('/api/ai/generate-character', async (req, res) => {
+  console.log('[v0] /api/ai/generate-character called with body:', req.body);
   try {
     const { genre = 'fantasy' } = req.body;
     
+    console.log('[v0] Calling generateText for character generation...');
     const { output } = await generateText({
       model: 'openai/gpt-4o-mini',
       output: Output.object({
@@ -34,9 +36,10 @@ app.post('/api/ai/generate-character', async (req, res) => {
       prompt: `Generate a unique and interesting character for a ${genre} story. Be creative with names, backstories, and personalities. Make the character feel original and compelling.`,
     });
 
+    console.log('[v0] Character generated successfully:', output);
     res.json({ success: true, character: output });
   } catch (error: any) {
-    console.error('Error generating character:', error);
+    console.error('[v0] Error generating character:', error.message, error.stack);
     res.status(500).json({ 
       success: false, 
       error: error.message || 'Failed to generate character'
@@ -46,6 +49,7 @@ app.post('/api/ai/generate-character', async (req, res) => {
 
 // Generate plot suggestion
 app.post('/api/ai/generate-plot', async (req, res) => {
+  console.log('[v0] /api/ai/generate-plot called');
   try {
     const { context = '', genre = 'fantasy' } = req.body;
     
@@ -77,6 +81,7 @@ Generate a creative and engaging plot point that would add depth to the narrativ
 
 // Generate writing suggestions
 app.post('/api/ai/writing-suggest', async (req, res) => {
+  console.log('[v0] /api/ai/writing-suggest called with type:', req.body.type);
   try {
     const { content, type = 'continuation', genre = 'fantasy' } = req.body;
     
@@ -122,6 +127,7 @@ Dialogue:`;
 
 // Generate portrait description (for use with placeholder images)
 app.post('/api/ai/portrait-description', async (req, res) => {
+  console.log('[v0] /api/ai/portrait-description called for:', req.body.characterName);
   try {
     const { characterName, characterDescription, style = 'Digital Art' } = req.body;
     

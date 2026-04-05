@@ -19,36 +19,51 @@ export interface PortraitDescription {
 
 // Generate a new character using AI
 export async function generateCharacter(genre: string = 'fantasy'): Promise<GeneratedCharacter> {
-  const response = await fetch('/api/ai/generate-character', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ genre }),
-  });
-  
-  const data = await response.json();
-  
-  if (!data.success) {
-    throw new Error(data.error || 'Failed to generate character');
+  console.log('[v0] generateCharacter called with genre:', genre);
+  try {
+    const response = await fetch('/api/ai/generate-character', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ genre }),
+    });
+    
+    console.log('[v0] generateCharacter response status:', response.status);
+    const data = await response.json();
+    console.log('[v0] generateCharacter response data:', data);
+    
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to generate character');
+    }
+    
+    return data.character;
+  } catch (error: any) {
+    console.error('[v0] generateCharacter error:', error);
+    throw error;
   }
-  
-  return data.character;
 }
 
 // Generate a plot suggestion using AI
 export async function generatePlotSuggestion(context: string, genre: string = 'fantasy'): Promise<GeneratedPlot> {
-  const response = await fetch('/api/ai/generate-plot', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ context, genre }),
-  });
-  
-  const data = await response.json();
-  
-  if (!data.success) {
-    throw new Error(data.error || 'Failed to generate plot');
+  console.log('[v0] generatePlotSuggestion called');
+  try {
+    const response = await fetch('/api/ai/generate-plot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ context, genre }),
+    });
+    
+    console.log('[v0] generatePlotSuggestion response status:', response.status);
+    const data = await response.json();
+    
+    if (!data.success) {
+      throw new Error(data.error || 'Failed to generate plot');
+    }
+    
+    return data.plot;
+  } catch (error: any) {
+    console.error('[v0] generatePlotSuggestion error:', error);
+    throw error;
   }
-  
-  return data.plot;
 }
 
 // Generate writing suggestions using AI
