@@ -28,19 +28,20 @@ app.post('/api/ai/generate-character', async (req, res) => {
     const { genre = 'fantasy' } = req.body;
     
     console.log('[v0] Calling generateText for character generation...');
-    const { output } = await generateText({
+    const { text } = await generateText({
       model: groq('llama-3.3-70b-versatile'),
-      output: Output.object({
-        schema: z.object({
-          name: z.string().describe('A unique character name'),
-          role: z.string().describe('The character role (e.g., Protagonist, Antagonist, Supporting)'),
-          description: z.string().describe('A brief character description, max 200 characters'),
-          quirk: z.string().describe('A unique character quirk or trait, max 100 characters'),
-        }),
-      }),
-      prompt: `Generate a unique and interesting character for a ${genre} story. Be creative with names, backstories, and personalities. Make the character feel original and compelling.`,
+      prompt: `Generate a unique and interesting character for a ${genre} story. Be creative with names, backstories, and personalities. Make the character feel original and compelling.
+      
+CRITICAL: You MUST respond ONLY with a raw JSON object and nothing else. No markdown, no quotes. The JSON must exactly match this format:
+{
+  "name": "A unique character name",
+  "role": "The character role (e.g., Protagonist, Antagonist, Supporting)",
+  "description": "A brief character description, max 200 characters",
+  "quirk": "A unique character quirk or trait, max 100 characters"
+}`,
     });
 
+    const output = JSON.parse(text.trim().replace(/^```json/, '').replace(/```$/, ''));
     console.log('[v0] Character generated successfully:', output);
     res.json({ success: true, character: output });
   } catch (error: any) {
@@ -58,21 +59,23 @@ app.post('/api/ai/generate-plot', async (req, res) => {
   try {
     const { context = '', genre = 'fantasy' } = req.body;
     
-    const { output } = await generateText({
+    const { text } = await generateText({
       model: groq('llama-3.3-70b-versatile'),
-      output: Output.object({
-        schema: z.object({
-          title: z.string().describe('A short title for the plot point, max 50 characters'),
-          content: z.string().describe('The plot content or description, max 300 characters'),
-        }),
-      }),
       prompt: `Based on the following story context, suggest a new interesting plot branch or twist for a ${genre} story.
       
 Context:
 ${context || 'A new story is beginning...'}
 
-Generate a creative and engaging plot point that would add depth to the narrative.`,
+Generate a creative and engaging plot point that would add depth to the narrative.
+
+CRITICAL: You MUST respond ONLY with a raw JSON object and nothing else. No markdown, no quotes. The JSON must exactly match this format:
+{
+  "title": "A short title for the plot point, max 50 characters",
+  "content": "The plot content or description, max 300 characters"
+}`,
     });
+
+    const output = JSON.parse(text.trim().replace(/^```json/, '').replace(/```$/, ''));
 
     res.json({ success: true, plot: output });
   } catch (error: any) {
@@ -136,22 +139,24 @@ app.post('/api/ai/portrait-description', async (req, res) => {
   try {
     const { characterName, characterDescription, style = 'Digital Art' } = req.body;
     
-    const { output } = await generateText({
+    const { text } = await generateText({
       model: groq('llama-3.3-70b-versatile'),
-      output: Output.object({
-        schema: z.object({
-          visualDescription: z.string().describe('A detailed visual description of the character portrait'),
-          seedKeywords: z.array(z.string()).describe('Keywords for generating a placeholder image seed'),
-        }),
-      }),
       prompt: `Create a detailed visual description for a character portrait.
 
 Character Name: ${characterName}
 Character Description: ${characterDescription}
 Artistic Style: ${style}
 
-Describe how this character would look in a portrait, including physical features, expression, lighting, and atmosphere.`,
+Describe how this character would look in a portrait, including physical features, expression, lighting, and atmosphere.
+
+CRITICAL: You MUST respond ONLY with a raw JSON object and nothing else. No markdown, no quotes. The JSON must exactly match this format:
+{
+  "visualDescription": "A detailed visual description of the character portrait",
+  "seedKeywords": ["keyword1", "keyword2"]
+}`,
     });
+
+    const output = JSON.parse(text.trim().replace(/^```json/, '').replace(/```$/, ''));
 
     res.json({ success: true, portrait: output });
   } catch (error: any) {
