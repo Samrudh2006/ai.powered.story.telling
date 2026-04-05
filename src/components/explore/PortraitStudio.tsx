@@ -24,7 +24,7 @@ export default function PortraitStudio() {
     if (!prompt.trim()) return;
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
       const ai = new GoogleGenAI({ apiKey });
       const fullPrompt = `${prompt}, style: ${style}, mood: ${mood}`;
       
@@ -55,11 +55,8 @@ export default function PortraitStudio() {
       }
     } catch (e: any) {
       console.error("Error generating image:", e);
-      if (e.message?.includes('API key not valid')) {
-        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
-      } else {
-        showToast("Failed to generate portrait. Please try again.", 'error');
-      }
+      const errorMessage = e.message || "Unknown error";
+      showToast(`Failed to generate portraits: ${errorMessage}`, 'error');
     }
     setIsGenerating(false);
   };

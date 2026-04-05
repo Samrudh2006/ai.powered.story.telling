@@ -95,7 +95,7 @@ export default function LoreForge() {
     if (!activeCharacter) return;
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash-image',
@@ -114,11 +114,8 @@ export default function LoreForge() {
       }
     } catch (error: any) {
       console.error("Error generating portrait:", error);
-      if (error.message?.includes('API key not valid')) {
-        showToast("Invalid Gemini API Key. Please check your environment variables.", 'error');
-      } else {
-        showToast("Failed to generate portrait. Please try again.", 'error');
-      }
+      const errorMessage = error.message || "Unknown error";
+      showToast(`Failed to generate portrait: ${errorMessage}`, 'error');
     }
     setIsGenerating(false);
   };
@@ -162,7 +159,7 @@ export default function LoreForge() {
   const handleGenerateAICharacter = async () => {
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -193,9 +190,10 @@ export default function LoreForge() {
       } else {
         throw new Error("Invalid response from AI API");
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error generating AI character:", error);
-      showToast('Failed to generate AI character.', 'error');
+      const errorMessage = error.message || "Unknown error";
+      showToast(`Failed to generate AI character: ${errorMessage}`, 'error');
     }
     setIsGenerating(false);
   };

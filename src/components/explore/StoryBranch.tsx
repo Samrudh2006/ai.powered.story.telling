@@ -137,7 +137,7 @@ export default function StoryBranch() {
     
     setIsGeneratingAI(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -190,7 +190,8 @@ export default function StoryBranch() {
       }
     } catch (error: any) {
       console.error("Error generating AI suggestion:", error);
-      showToast('Failed to generate AI suggestion.', 'error');
+      const errorMessage = error.message || "Unknown error";
+      showToast(`Failed to generate AI suggestion: ${errorMessage}`, 'error');
     }
     setIsGeneratingAI(false);
   };

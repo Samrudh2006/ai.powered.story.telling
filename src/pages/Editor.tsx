@@ -221,7 +221,7 @@ export default function Editor() {
     if (!promptToUse.trim()) return;
     setIsGenerating(true);
     try {
-      const apiKey = import.meta.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
+      const apiKey = import.meta.env.VITE_AI_API_KEY || process.env.VITE_AI_API_KEY || "e54acf96-6237-43a4-989b-6076e0fd0f90";
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
@@ -237,8 +237,9 @@ export default function Editor() {
         throw new Error("Invalid response from AI API");
       }
     } catch (e: any) {
-      console.error(e);
-      setSuggestion("Error connecting to Muse. Please try again later.");
+      console.error("Muse Error:", e);
+      const errorMessage = e.message || "Unknown error";
+      setSuggestion(`Error connecting to Muse: ${errorMessage}. Please check your API key and network connection.`);
     }
     setIsGenerating(false);
     if (!overridePrompt) {
